@@ -7,7 +7,7 @@ from copy import deepcopy
 import os
 from torch.distributions import Normal
 
-
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 class Q(nn.Module):
     '''
     IQL-Q net
@@ -136,10 +136,15 @@ class IQL(nn.Module):
             self.actors.cuda()
         self.FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
 
-    def step(self, states, actions, rewards, next_states, dones):
+    def step(self, states, actions, rewards, next_states, dones,weights = None,sample_idx = None):
         '''
         train model
         '''
+        states = states.to(device)
+        actions = actions.to(device)
+        next_states = next_states.to(device)
+        dones = dones.to(device)
+        rewards = rewards.to(device)
 
         self.value_optimizer.zero_grad()
         value_loss = self.calc_value_loss(states, actions)
@@ -168,7 +173,7 @@ class IQL(nn.Module):
         '''
         take action
         '''
-        states = torch.Tensor(states).type(self.FloatTensor)
+        states = torch.Tensor(states)
         if self.deterministic_action:
             actions = self.actors.get_det_action(states)
         else:
@@ -191,7 +196,7 @@ class IQL(nn.Module):
             min_Q = torch.min(q1, q2)
 
         exp_a = torch.exp(min_Q - v) * self.temperature
-        exp_a = torch.min(exp_a, torch.FloatTensor([100.0]))
+        exp_a = torch.min(exp_a,self.FloatTensor([100.0]))
 
         _, dist = self.actors.evaluate(states)
         log_probs = dist.log_prob(actions)
@@ -279,6 +284,7 @@ class IQL(nn.Module):
 
 if __name__ == '__main__':
     model = IQL()
+
     step_num = 100
     batch_size = 1000
     for i in range(step_num):

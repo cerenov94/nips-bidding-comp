@@ -1,11 +1,14 @@
 import numpy as np
 import logging
+
+import torch.cuda
 from bidding_train_env.common.utils import normalize_state, normalize_reward, save_normalize_dict
-from bidding_train_env.baseline.iql.replay_buffer import ReplayBuffer
+from bidding_train_env.baseline.iql.replay_buffer import ReplayBuffer,PrioritizedReplayBuffer
 from bidding_train_env.baseline.iql.iql import IQL
 import sys
 import pandas as pd
 import ast
+import os
 
 np.set_printoptions(suppress=True, precision=4)
 logging.basicConfig(level=logging.INFO,
@@ -14,12 +17,12 @@ logger = logging.getLogger(__name__)
 
 STATE_DIM = 16
 
-
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 def train_iql_model():
     """
     Train the IQL model.
     """
-    train_data_path = "./data/traffic/training_data_rlData_folder/training_data_all-rlData.csv"
+    train_data_path = "./data/traffic/training_data_rlData_folder/training_data_all-rlData.csv" # . вместо Neupy
     training_data = pd.read_csv(train_data_path)
 
     def safe_literal_eval(val):
@@ -46,7 +49,7 @@ def train_iql_model():
     # Build replay buffer
     replay_buffer = ReplayBuffer()
     add_to_replay_buffer(replay_buffer, training_data, is_normalize)
-    print(len(replay_buffer.memory))
+    print('replay buffer length',len(replay_buffer.memory))
 
     # Train model
     model = IQL(dim_obs=STATE_DIM)
@@ -71,7 +74,7 @@ def add_to_replay_buffer(replay_buffer, training_data, is_normalize):
                                np.array([done]))
 
 
-def train_model_steps(model, replay_buffer, step_num=20000, batch_size=100):
+def train_model_steps(model, replay_buffer, step_num=100000, batch_size=8):
     for i in range(step_num):
         states, actions, rewards, next_states, terminals = replay_buffer.sample(batch_size)
         q_loss, v_loss, a_loss = model.step(states, actions, rewards, next_states, terminals)
@@ -80,8 +83,10 @@ def train_model_steps(model, replay_buffer, step_num=20000, batch_size=100):
 
 def test_trained_model(model, replay_buffer):
     states, actions, rewards, next_states, terminals = replay_buffer.sample(100)
+
     pred_actions = model.take_actions(states)
     actions = actions.cpu().detach().numpy()
+
     tem = np.concatenate((actions, pred_actions), axis=1)
     print("action VS pred action:", tem)
 
