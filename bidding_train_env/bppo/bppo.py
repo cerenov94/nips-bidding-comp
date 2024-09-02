@@ -8,30 +8,32 @@ import os
 class V(nn.Module):
     def __init__(self ,state ,hidden_dim):
         super().__init__()
-        self.linear1 = nn.Linear(state ,hidden_dim)
+        self.linear1 = nn.Linear(state ,hidden_dim * 2)
         self.activation = nn.Tanh()
-        self.linear2 = nn.Linear(hidden_dim ,hidden_dim)
-        self.linear3 = nn.Linear(hidden_dim ,1)
+        self.linear2 = nn.Linear(hidden_dim * 2,hidden_dim)
+        self.linear3 = nn.Linear(hidden_dim ,hidden_dim)
+        self.linear4 = nn.Linear(hidden_dim,1)
 
     def forward(self ,state):
-        state = self.linear3(self.activation(self.linear2(self.activation(self.linear1(state)))))
-        return state
+        value = self.linear4(self.activation(self.linear3(self.activation(self.linear2(self.activation(self.linear1(state)))))))
+        return value
 
 class Q(nn.Module):
     def __init__(self ,state ,action ,hidden_dim):
         super().__init__()
 
-        self.net = nn.Sequential(
-            nn.Linear(state + action ,hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim ,hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim ,1)
-        )
+        self.obs_emb = nn.Linear(state,hidden_dim)
+        self.act_emb = nn.Linear(action,hidden_dim)
+        self.linear1 = nn.Linear(hidden_dim * 2,hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim,hidden_dim)
+        self.linear3 = nn.Linear(hidden_dim,1)
 
     def forward(self ,state ,action):
-        sa = torch.cat([state ,action] ,dim=1)
-        return self.net(sa)
+        state = self.obs_emb(state)
+        action = self.act_emb(action)
+        sa = torch.cat([state,action],dim=-1)
+        qv = self.linear3(F.relu(self.linear2(F.relu(self.linear1(sa)))))
+        return qv
 
 
 class Policy(nn.Module):
@@ -62,23 +64,30 @@ class Value:
     def __init__(self, dim_obs=16, hidden_dim=64, lr=1e-4, batch_size=4,device = 'cpu'):
         super().__init__()
 
-        self.value_net = V(dim_obs, hidden_dim * 2).to(device)
+        self.value_net = V(dim_obs, hidden_dim).to(device)
         self.optimizer = torch.optim.Adam(self.value_net.parameters(), lr=lr)
         self.batch_size = batch_size
 
     def __call__(self, state):
         return self.value_net(state)
 
-    def train(self, replay_buffer):
+    def train(self, replay_buffer,Q1,Q2):
         state, action, reward, next_state, next_action, not_done, G = replay_buffer.sample(self.batch_size)
-
+        with torch.no_grad():
+            q1 = Q1(state,action)
+            q2 = Q2(state,action)
+            min_Q = torch.min(q1,q2)
         value = self.value_net(state)
 
-        loss = F.mse_loss(value, G)
+        loss = self.l2_loss(min_Q-value,0.7).mean()
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         return loss.item()
+
+    def l2_loss(self, diff, expectile=0.8):
+        weight = torch.where(diff > 0, expectile, (1 - expectile))
+        return weight * (diff ** 2)
 
 
 class QL:
@@ -120,9 +129,9 @@ class QL:
         self.update_counter += 1
         if self.update_counter % self.update_freq == 0:
             # print('updating')
-            # for param,target_param in zip(self.Q.parameters(),self.target_Q.parameters()):
-            #     target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-            self.target_Q.load_state_dict(self.Q.state_dict())
+            for param,target_param in zip(self.Q.parameters(),self.target_Q.parameters()):
+                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+            #self.target_Q.load_state_dict(self.Q.state_dict())
 
         return q_loss.item()
 
@@ -234,7 +243,8 @@ class PPO:
     def loss(
             self,
             replay_buffer,
-            Q=None,
+            Q1=None,
+            Q2=None,
             V=None,
             is_clip_decay=None,
             is_lr_decay=None
@@ -259,8 +269,8 @@ class PPO:
 
         return loss
 
-    def train(self, replay_buffer, Q=None, V=None, is_clip_decay=None, is_lr_decay=None):
-        loss = self.loss(replay_buffer, Q, V, is_clip_decay, is_lr_decay)
+    def train(self, replay_buffer, Q1=None,Q2=None, V=None, is_clip_decay=None, is_lr_decay=None):
+        loss = self.loss(replay_buffer, Q1,Q2, V, is_clip_decay, is_lr_decay)
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
@@ -292,13 +302,13 @@ class BPPO(PPO):
         self.batch_size = batch_size
         self.entropy = entropy
 
-    def loss(self, replay_buffer, Q, V, is_clip_decay, is_lr_decay):
+    def loss(self, replay_buffer, Q1,Q2, V, is_clip_decay, is_lr_decay):
         state, action, reward, next_state, next_action, not_done, G = replay_buffer.sample(self.batch_size)
 
         old_dist = self.old_policy(state)
         a = old_dist.rsample()
-
-        advantage = Q(state, a) - V(state)
+        min_Q = torch.min(Q1(state,a),Q2(state,a))
+        advantage = min_Q - V(state)
         advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
         new_dist = self.policy(state)

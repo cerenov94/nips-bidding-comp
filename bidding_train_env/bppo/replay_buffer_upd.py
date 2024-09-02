@@ -22,9 +22,12 @@ class ReplayBuffer:
         experience = Experience(state, action, reward, next_state, next_action,done,G)
         self.memory.append(experience)
 
-    def sample(self, batch_size):
+    def sample(self, batch_size,random_samples = True,ids = None):
         """randomly sampling a batch of experiences"""
-        tem = random.sample(self.memory, batch_size)
+        if random_samples:
+            tem = random.sample(self.memory, batch_size)
+        else:
+            tem = self.memory[ids[0]:ids[-1]]
         states, actions, rewards, next_states,next_action,dones,G = zip(*tem)
         states, actions, rewards, next_states,next_action,dones,G = np.stack(states), np.stack(actions), np.stack(rewards), np.stack(
             next_states),np.stack(next_action),np.stack(dones),np.stack(G)
