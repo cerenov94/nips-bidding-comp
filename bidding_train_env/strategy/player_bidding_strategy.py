@@ -23,7 +23,11 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
         dir_name = os.path.dirname(dir_name)
         model_path = os.path.join(dir_name,"saved_model","BPPOtest","bppo_model.pth")
         dict_path = os.path.join(dir_name,"saved_model","BPPOtest","normalize_dict.pkl")
-        self.model = BPPO(hidden_dim=128)
+        min_action_path = os.path.join(dir_name,"saved_model","BPPOtest","min_action.npy")
+        action_range_path = os.path.join(dir_name,"saved_model","BPPOtest","action_range.npy")
+        self.min_action = np.load(min_action_path)
+        self.action_range = np.load(action_range_path)
+        self.model = BPPO(hidden_dim=64)
         self.model.load_weights(model_path)
         with open(dict_path, 'rb') as file:
             self.normalize_dict = pickle.load(file)
@@ -107,7 +111,10 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
 
         alpha = self.model.get_action(test_state.unsqueeze(dim=0))
         alpha = alpha.squeeze(dim=0)
-        alpha = alpha.cpu().numpy()
-        bids = alpha * pValues
+        #alpha = alpha * self.action_range + self.min_action
+        #alpha = torch.clamp(alpha,min=0)
+        #alpha = alpha.cpu().numpy()
+        #alpha = np.clip(alpha,0,float('inf'))
+        bids = alpha.numpy() * pValues
 
         return bids
