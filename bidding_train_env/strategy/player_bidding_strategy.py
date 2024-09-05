@@ -27,7 +27,7 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
         action_range_path = os.path.join(dir_name,"saved_model","BPPOtest","action_range.npy")
         self.min_action = np.load(min_action_path)
         self.action_range = np.load(action_range_path)
-        self.model = BPPO(hidden_dim=128)
+        self.model = BPPO(hidden_dim=256)
         self.model.load_weights(model_path)
         with open(dict_path, 'rb') as file:
             self.normalize_dict = pickle.load(file)

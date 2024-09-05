@@ -34,13 +34,13 @@ if __name__ == "__main__":
 
     # Behavior clone hyperparameters
     parser.add_argument("--bc_steps",default=10000,type = int)
-    parser.add_argument("--bc_hidden_dim",default=128,type = int)
+    parser.add_argument("--bc_hidden_dim",default=256,type = int)
     parser.add_argument("--bc_lr",default=1e-4,type = float)
     parser.add_argument("--bc_bs",default=32,type = int)
 
     # BPPO learning hyperparameters
-    parser.add_argument("--bppo_steps",default=10000,type = int)
-    parser.add_argument("--bppo_hidden_dim",default=128,type = int,help="should be equal BC hidden dim")
+    parser.add_argument("--bppo_steps",default=14000,type = int)
+    parser.add_argument("--bppo_hidden_dim",default=256,type = int,help="should be equal BC hidden dim")
     parser.add_argument("--bppo_lr",default=1e-4,type = float)
     parser.add_argument("--bppo_bs",default=16,type = int)
     parser.add_argument("--is_clip_decay",default=True,type = bool)

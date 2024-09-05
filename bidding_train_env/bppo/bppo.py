@@ -5,8 +5,74 @@ import torch.nn.functional as F
 from copy import deepcopy
 import os
 import numpy as np
-from edac import VectorizedCritic
+import math
 
+
+
+class VectorizedLinear(nn.Module):
+    def __init__(self, in_features: int, out_features: int, ensemble_size: int):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.ensemble_size = ensemble_size
+
+        self.weight = nn.Parameter(torch.empty(ensemble_size, in_features, out_features))
+        self.bias = nn.Parameter(torch.empty(ensemble_size, 1, out_features))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        # default pytorch init for nn.Linear module
+        for layer in range(self.ensemble_size):
+            nn.init.kaiming_uniform_(self.weight[layer], a=math.sqrt(5))
+
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight[0])
+        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+        nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # input: [ensemble_size, batch_size, input_size]
+        # weight: [ensemble_size, input_size, out_size]
+        # out: [ensemble_size, batch_size, out_size]
+        return x @ self.weight + self.bias
+
+class VectorizedCritic(nn.Module):
+    def __init__(
+        self, state_dim: int, action_dim: int, hidden_dim: int, num_critics: int
+    ):
+        super().__init__()
+        self.critic = nn.Sequential(
+            VectorizedLinear(state_dim + action_dim, hidden_dim, num_critics),
+            nn.ReLU(),
+            VectorizedLinear(hidden_dim, hidden_dim, num_critics),
+            nn.ReLU(),
+            VectorizedLinear(hidden_dim, hidden_dim, num_critics),
+            nn.ReLU(),
+            VectorizedLinear(hidden_dim, 1, num_critics),
+        )
+        # init as in the EDAC paper
+        for layer in self.critic[::2]:
+            torch.nn.init.constant_(layer.bias, 0.1)
+
+        torch.nn.init.uniform_(self.critic[-1].weight, -3e-3, 3e-3)
+        torch.nn.init.uniform_(self.critic[-1].bias, -3e-3, 3e-3)
+
+        self.num_critics = num_critics
+
+    def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        # [..., batch_size, state_dim + action_dim]
+        state_action = torch.cat([state, action], dim=-1)
+        if state_action.dim() != 3:
+            assert state_action.dim() == 2
+            # [num_critics, batch_size, state_dim + action_dim]
+            state_action = state_action.unsqueeze(0).repeat_interleave(
+                self.num_critics, dim=0
+            )
+        assert state_action.dim() == 3
+        assert state_action.shape[0] == self.num_critics
+        # [num_critics, batch_size]
+        q_values = self.critic(state_action).squeeze(-1)
+        return q_values
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -208,7 +274,7 @@ class QP(QL):
         pdf = p.policy.get_pdf(next_state)
         next_a = pdf.rsample()
         with torch.no_grad():
-            q_target_value = reward + (1 - done) * self.gamma * V(next_state)
+            q_target_value = reward + (1 - done) * self.gamma * self.target_Q(next_state,next_a.to(next_state.device))
         q_value = self.Q(state, action)
         loss = F.mse_loss(q_value, q_target_value)
 
