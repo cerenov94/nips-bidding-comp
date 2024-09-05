@@ -137,13 +137,17 @@ def train_model(
     training_data['reward'] = normalize_reward(training_data, 'reward_continuous')
     save_normalize_dict(normalize_dic, "saved_model/BPPOtest")
 
-
+    #action_std = training_data['action'].std()
+    #action_mean = training_data['action'].mean()
+    #np.save('saved_model/BPPOtest/action_range.npy',action_std)
+    #np.save('saved_model/BPPOtest/min_action.npy',action_mean)
+    #training_data['action'] = (training_data['action'] - action_mean)/action_std
     add_to_replay_buffer(replay_buffer, training_data, True)
 
 
     VL = Value(hidden_dim=value_hidden_dim,lr=value_lr,batch_size=value_bs,device=device)
 
-    SARSA = QLSarsa(
+    SARSA1 = QLSarsa(
         hidden_dim=qvalue_hidden_dim,
         lr = qvalue_lr,
         update_freq=qvalue_update_freq,
@@ -152,7 +156,25 @@ def train_model(
         batch_size=qvalue_bs,
         device = device
     )
-    QPL = QP(
+    SARSA2 = QLSarsa(
+        hidden_dim=qvalue_hidden_dim,
+        lr = qvalue_lr,
+        update_freq=qvalue_update_freq,
+        tau=qvalue_tau,
+        gamma=qvalue_gamma,
+        batch_size=qvalue_bs,
+        device = device
+    )
+    QPL1 = QP(
+        hidden_dim=qvalue_hidden_dim,
+        lr=qvalue_lr,
+        update_freq=qvalue_update_freq,
+        tau=qvalue_tau,
+        gamma=qvalue_gamma,
+        batch_size=qvalue_bs,
+        device=device
+    )
+    QPL2 = QP(
         hidden_dim=qvalue_hidden_dim,
         lr=qvalue_lr,
         update_freq=qvalue_update_freq,
@@ -167,7 +189,7 @@ def train_model(
         batch_size=bc_bs,
         device = device
     )
-    BPPOL = BPPO(hidden_dim=bppo_hidden_dim,lr=bppo_lr,batch_size = bppo_bs,device = device)
+    BPPOL = BPPO(hidden_dim=bppo_hidden_dim,lr=bppo_lr,batch_size = bppo_bs,device = device,clip_ratio=0.1)
 
     VALUE_STEPS = value_steps
     SARSA_STEPS = qvalue_steps
@@ -176,22 +198,26 @@ def train_model(
 
     # sarsa learn
     for step in tqdm(range(SARSA_STEPS)):
-        loss = SARSA.train(replay_buffer)
-
+        value_loss = VL.train(replay_buffer=replay_buffer,Q1=SARSA1,Q2=SARSA2)
+        loss1 = SARSA1.train(replay_buffer,V=VL)
+        loss2 = SARSA2.train(replay_buffer,V=VL)
         if step % 200 == 0:
-            print(f'Step: {step},Loss: {loss:.4f}')
+            print(f'Step: {step},Value loss: {value_loss:.4f},Loss1: {loss1:.4f},Loss2: {loss2:.4f}')
 
     # value learn
-    for step in tqdm(range(VALUE_STEPS)):
-        loss = VL.train(replay_buffer)
+    # for step in tqdm(range(VALUE_STEPS)):
+    #     loss = VL.train(replay_buffer,SARSA1,SARSA2)
+    #
+    #     if step % 200 == 0:
+    #         print(f'Step: {step},Loss: {loss:.4f}')
 
-        if step % 200 == 0:
-            print(f'Step: {step},Loss: {loss:.4f}')
 
 
+    QPL1.target_Q.load_state_dict(SARSA1.Q.state_dict())
+    QPL1.Q.load_state_dict(SARSA1.Q.state_dict())
 
-    QPL.target_Q.load_state_dict(SARSA.Q.state_dict())
-    QPL.Q.load_state_dict(SARSA.Q.state_dict())
+    QPL2.target_Q.load_state_dict(SARSA2.Q.state_dict())
+    QPL2.Q.load_state_dict(SARSA2.Q.state_dict())
 
     # behaviour clone learn
     for step in tqdm(range(BC_STEPS)):
@@ -204,24 +230,40 @@ def train_model(
 
     BPPOL.policy.load_state_dict(BCL.policy.state_dict())
     BPPOL.old_policy.load_state_dict(BCL.policy.state_dict())
-    QQ = SARSA
-    score = float('inf')
+
+    QQ1 = SARSA1
+    QQ2 = SARSA2
+
+    best_score = float('inf')
+    test_chunks = [305]
+    chunks = np.split(training_data, 336)
+    delta = 1e-2
     for step in tqdm(range(BPPO_STEPS)):
         if step > 200:
             is_clip_decay = False
             is_bppo_lr_decay = False
-        loss = BPPOL.train(replay_buffer, QQ, VL, is_clip_decay, is_bppo_lr_decay)
-        state, action, _, _, _, _, _ = replay_buffer.sample(16128)
-        pred_action = BPPOL.get_action(state)
-        current_score = F.l1_loss(pred_action.to(device), action).detach().cpu().numpy()
-        if current_score < score:
-            score = current_score
-            BPPOL.old_policy.load_state_dict(BPPOL.policy.state_dict())
-        for i in range(20):
-            q_loss = QPL.train(replay_buffer, BPPOL)
-        QQ = QPL
 
-        print(f'Step: {step},loss: {loss:.4f},best score : {score:.4f}')
+        loss,approx_kl = BPPOL.train(replay_buffer, QQ1,QQ2, VL, is_clip_decay, is_bppo_lr_decay)
+        scores_for_chunks = []
+        for chunk_id in test_chunks:
+            ids = np.array(chunks[chunk_id].index)
+            state, action, _, _, _, _, _ = replay_buffer.sample(48,random_samples = False,ids = ids)
+            pred_action = BPPOL.get_action(state)
+            current_score = F.l1_loss(pred_action.to(device), action).detach().cpu().numpy()
+            scores_for_chunks.append(current_score)
+        if np.mean(scores_for_chunks) < best_score:
+           best_score = np.mean(scores_for_chunks)
+           BPPOL.old_policy.load_state_dict(BPPOL.policy.state_dict())
+
+        # for i in range(20):
+        #     q_loss1 = QPL1.train(replay_buffer, BPPOL)
+        #     q_loss2 = QPL2.train(replay_buffer, BPPOL)
+        # QQ1 = QPL1
+        # QQ2 = QPL2
+
+        print(f'Step: {step},loss: {loss:.4f},best score : {best_score:.4f},approx kl:{approx_kl:.4f}')
+        #if approx_kl < delta:
+        #    break
 
     BPPOL.save_weights()
 

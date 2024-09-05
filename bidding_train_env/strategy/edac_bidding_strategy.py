@@ -6,28 +6,28 @@ import pickle
 
 import torch
 
-from bidding_train_env.bppo.bppo import  BPPO
+from bidding_train_env.bppo.edac import EDAC
 from bidding_train_env.strategy.base_bidding_strategy import BaseBiddingStrategy
 
 
-class PlayerBiddingStrategy(BaseBiddingStrategy):
+class EdacBiddingStrategy(BaseBiddingStrategy):
     """
     Simple Strategy example for bidding.
     """
 
-    def __init__(self, budget=100, name="BPPO-PlayerStrategy", cpa=2, category=1):
+    def __init__(self, budget=100, name="EDAC-PlayerStrategy", cpa=2, category=1):
         super().__init__(budget, name, cpa, category)
 
         file_name = os.path.dirname(os.path.realpath(__file__))
         dir_name = os.path.dirname(file_name)
         dir_name = os.path.dirname(dir_name)
-        model_path = os.path.join(dir_name,"saved_model","BPPOtest","bppo_model.pth")
-        dict_path = os.path.join(dir_name,"saved_model","BPPOtest","normalize_dict.pkl")
-        min_action_path = os.path.join(dir_name,"saved_model","BPPOtest","min_action.npy")
-        action_range_path = os.path.join(dir_name,"saved_model","BPPOtest","action_range.npy")
+        model_path = os.path.join(dir_name,"saved_model","EDACtest","edac_model.pth")
+        dict_path = os.path.join(dir_name,"saved_model","EDACtest","normalize_dict.pkl")
+        min_action_path = os.path.join(dir_name,"saved_model","EDACtest","min_action.npy")
+        action_range_path = os.path.join(dir_name,"saved_model","EDACtest","action_range.npy")
         self.min_action = np.load(min_action_path)
         self.action_range = np.load(action_range_path)
-        self.model = BPPO(hidden_dim=128)
+        self.model = EDAC()
         self.model.load_weights(model_path)
         with open(dict_path, 'rb') as file:
             self.normalize_dict = pickle.load(file)
@@ -111,6 +111,8 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
 
         alpha = self.model.get_action(test_state.unsqueeze(dim=0))
         alpha = alpha.squeeze(dim=0)
+        #alpha = (self.action_range * (alpha.numpy() + 1)) / 2 + self.min_action
+        #alpha = np.clip(alpha,0,float('inf'))
         #alpha = alpha * self.action_range + self.min_action
         #alpha = torch.clamp(alpha,min=0)
         #alpha = alpha.cpu().numpy()

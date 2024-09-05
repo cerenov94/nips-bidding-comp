@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from copy import deepcopy
 import os
 import numpy as np
+from edac import VectorizedCritic
 
 
 
@@ -50,10 +51,12 @@ class Policy(nn.Module):
         self.min_log_std = -10
         self.max_logs_std = 2
         self.net = nn.Sequential(
-            layer_init(nn.Linear(dim_obs, hidden_dim * 2)),
+            layer_init(nn.Linear(dim_obs, hidden_dim)),
             nn.ReLU(),
-            layer_init(nn.Linear(hidden_dim * 2, hidden_dim)),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.ReLU(),
+            layer_init(nn.Linear(hidden_dim,hidden_dim)),
+            nn.ReLU()
         )
         self.mu = layer_init(nn.Linear(hidden_dim,actions_dim))
         self.std = layer_init(nn.Linear(hidden_dim,actions_dim))
@@ -205,7 +208,43 @@ class QP(QL):
         pdf = p.policy.get_pdf(next_state)
         next_a = pdf.rsample()
         with torch.no_grad():
-            q_target_value = reward + (1 - done) * self.gamma * self.target_Q(next_state, next_a.to(state.device))
+            q_target_value = reward + (1 - done) * self.gamma * V(next_state)
+        q_value = self.Q(state, action)
+        loss = F.mse_loss(q_value, q_target_value)
+
+        return loss
+
+
+class QLVect(QL):
+    def __init__(
+            self,
+            dim_obs=16,
+            dim_actions=1,
+            hidden_dim=128,
+            lr=1e-4,
+            update_freq=200,
+            tau=5e-3,
+            gamma=0.99,
+            batch_size=4,
+            num_critics = 10,
+            device = 'cpu'
+    ):
+        super().__init__()
+        self.Q = VectorizedCritic(state_dim=dim_obs,action_dim=dim_actions,hidden_dim=hidden_dim,num_critics=num_critics).to(device)
+        with torch.no_grad():
+            self.target_Q = deepcopy(self.Q).to(device)
+        self.optimizer = torch.optim.Adam(self.Q.parameters(), lr=lr)
+        self.update_freq = update_freq
+        self.tau = tau
+        self.gamma = gamma
+        self.batch_size = batch_size
+        self.update_counter = 0
+
+    def loss(self, replay_buffer, p=None,V = None):
+        state, action, reward, next_state, next_action, done, G = replay_buffer.sample(self.batch_size)
+        with torch.no_grad():
+            #q_target_value = reward + (1 - done) * self.gamma * self.target_Q(next_state, next_action)
+            q_target_value = reward + (1 - done) * self.gamma * V(next_state)
         q_value = self.Q(state, action)
         loss = F.mse_loss(q_value, q_target_value)
 
@@ -350,7 +389,7 @@ class BPPO(PPO):
             advantage = min_Q - V(state)
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-        advantage = self.weighted_advantage(advantage)
+        #advantage = self.weighted_advantage(advantage)
 
         new_dist = self.policy.get_pdf(state)
 
