@@ -41,27 +41,23 @@ class VectorizedCritic(nn.Module):
         self, state_dim: int, action_dim: int, hidden_dim: int, num_critics: int
     ):
         super().__init__()
+        self.obs_emb = layer_init(VectorizedLinear(state_dim,hidden_dim,ensemble_size=num_critics))
+        self.act_emb = layer_init(VectorizedLinear(action_dim,hidden_dim,num_critics))
         self.critic = nn.Sequential(
-            VectorizedLinear(state_dim + action_dim, hidden_dim, num_critics),
+            layer_init(VectorizedLinear(hidden_dim * 2, hidden_dim, num_critics)),
             nn.ReLU(),
-            VectorizedLinear(hidden_dim, hidden_dim, num_critics),
+            layer_init(VectorizedLinear(hidden_dim, hidden_dim, num_critics)),
             nn.ReLU(),
-            VectorizedLinear(hidden_dim, hidden_dim, num_critics),
-            nn.ReLU(),
-            VectorizedLinear(hidden_dim, 1, num_critics),
+            layer_init(VectorizedLinear(hidden_dim, 1, num_critics)),
         )
-        # init as in the EDAC paper
-        for layer in self.critic[::2]:
-            torch.nn.init.constant_(layer.bias, 0.1)
-
-        torch.nn.init.uniform_(self.critic[-1].weight, -3e-3, 3e-3)
-        torch.nn.init.uniform_(self.critic[-1].bias, -3e-3, 3e-3)
-
         self.num_critics = num_critics
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         # [..., batch_size, state_dim + action_dim]
+        state = self.obs_emb(state)
+        action = self.act_emb(action)
         state_action = torch.cat([state, action], dim=-1)
+        #state_action = F.relu(state_action)
         if state_action.dim() != 3:
             assert state_action.dim() == 2
             # [num_critics, batch_size, state_dim + action_dim]
@@ -156,12 +152,10 @@ class Value:
     def __call__(self, state):
         return self.value_net(state)
 
-    def train(self, replay_buffer,Q1,Q2):
+    def train(self, replay_buffer,Q):
         state, action, reward, next_state, next_action, not_done, G = replay_buffer.sample(self.batch_size)
         with torch.no_grad():
-            q1 = Q1(state,action)
-            q2 = Q2(state,action)
-            min_Q = torch.min(q1,q2)
+            min_Q = Q(state,action).min(0).values
         value = self.value_net(state)
 
         loss = self.l2_loss(min_Q-value,0.7).mean()
@@ -281,7 +275,7 @@ class QP(QL):
         return loss
 
 
-class QLVect(QL):
+class QLVect:
     def __init__(
             self,
             dim_obs=16,
@@ -293,7 +287,9 @@ class QLVect(QL):
             gamma=0.99,
             batch_size=4,
             num_critics = 10,
-            device = 'cpu'
+            device = 'cpu',
+            eta = 1.0,
+            alpha_lr = 1e-4
     ):
         super().__init__()
         self.Q = VectorizedCritic(state_dim=dim_obs,action_dim=dim_actions,hidden_dim=hidden_dim,num_critics=num_critics).to(device)
@@ -305,16 +301,96 @@ class QLVect(QL):
         self.gamma = gamma
         self.batch_size = batch_size
         self.update_counter = 0
+        self.num_critics = num_critics
+        self.device = device
+        self.eta = eta
+        # alpha
+        self.alpha_lr = alpha_lr
+        self.target_entropy = -float(dim_actions)
+        self.log_alpha = torch.tensor([0.0],dtype=torch.float32,device=self.device,requires_grad=True)
+        self.alph_optimizer = torch.optim.Adam([self.log_alpha],lr = self.alpha_lr)
+        self.alpha = self.log_alpha.exp().detach()
 
     def loss(self, replay_buffer, p=None,V = None):
         state, action, reward, next_state, next_action, done, G = replay_buffer.sample(self.batch_size)
+        # alpha
+        #alpha_loss = self.alpha_loss(state,p)
+        #self.alph_optimizer.zero_grad()
+        #alpha_loss.backward()
+        #self.alph_optimizer.step()
+        #self.alpha = self.log_alpha.exp().detach()
+
+
+
         with torch.no_grad():
             #q_target_value = reward + (1 - done) * self.gamma * self.target_Q(next_state, next_action)
+            #pdf = p.policy.get_pdf(next_state)
+            #next_a = pdf.rsample()
+            #log_prob = pdf.log_prob(next_a).squeeze(dim=-1)
+            #q_next = self.target_Q(next_state,next_a.to(next_state.device)).min(0).values
+            #q_next = q_next + self.alpha * log_prob
             q_target_value = reward + (1 - done) * self.gamma * V(next_state)
         q_value = self.Q(state, action)
-        loss = F.mse_loss(q_value, q_target_value)
-
+        loss = (q_value - q_target_value.view(1,-1)).pow(2).mean(1).sum(0)
+        #div_loss = self.critic_diversity_loss(state,action)
+        #loss = loss + self.eta * div_loss
         return loss
+
+    def critic_diversity_loss(
+            self,
+            state,
+            action
+    ):
+        num_critics = self.num_critics
+        state = state.unsqueeze(dim=0).repeat_interleave(num_critics,dim=0)
+        action = (
+            action.unsqueeze(dim=0).repeat_interleave(num_critics,dim=0).requires_grad_(True)
+        )
+
+
+        q_values = self.Q(state,action)
+
+        q_action_grad = torch.autograd.grad(
+            q_values.sum(),action,retain_graph=True,create_graph=True
+        )[0]
+        q_action_grad = q_action_grad/(torch.norm(q_action_grad,p=2,dim=2).unsqueeze(-1) + 1e-10)
+        q_action_grad = q_action_grad.transpose(0, 1)
+        masks = (torch.eye(num_critics,device=self.device).unsqueeze(dim=0).repeat(q_action_grad.shape[0],1,1))
+
+        q_action_grad = q_action_grad @ q_action_grad.permute(0,2,1)
+        q_action_grad = (1 - masks) * q_action_grad
+
+        grad_loss = q_action_grad.sum(dim=(1,2)).mean()
+        grad_loss = grad_loss / (num_critics - 1)
+
+        return grad_loss
+
+    def alpha_loss(self,state,p):
+        with torch.no_grad():
+            pdf = p.policy.get_pdf(state)
+            action = pdf.rsample()
+            action_log_prob = pdf.log_prob(action).squeeze(dim=-1)
+        loss = (-self.log_alpha * (action_log_prob + self.target_entropy)).mean()
+        return loss
+
+    def train(self, replay_buffer, p=None,V = None):
+        q_loss = self.loss(replay_buffer, p,V)
+        self.optimizer.zero_grad()
+        q_loss.backward()
+        self.optimizer.step()
+
+        self.update_counter += 1
+        if self.update_counter % self.update_freq == 0:
+            with torch.no_grad():
+
+                #print('updating',self.update_counter)
+                for param,target_param in zip(self.Q.parameters(),self.target_Q.parameters()):
+                    target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+                #self.target_Q.load_state_dict(self.Q.state_dict())
+
+        return q_loss.item()
+    def __call__(self, state, action):
+        return self.Q(state, action)
 
 
 class BC:
@@ -365,8 +441,7 @@ class PPO:
     def loss(
             self,
             replay_buffer,
-            Q1=None,
-            Q2=None,
+            Q=None,
             V=None,
             is_clip_decay=None,
             is_lr_decay=None
@@ -391,8 +466,8 @@ class PPO:
 
         return loss
 
-    def train(self, replay_buffer, Q1=None,Q2=None, V=None, is_clip_decay=None, is_lr_decay=None):
-        loss,approx_kl = self.loss(replay_buffer, Q1,Q2, V, is_clip_decay, is_lr_decay)
+    def train(self, replay_buffer, Q=None, V=None, is_clip_decay=None, is_lr_decay=None):
+        loss,approx_kl = self.loss(replay_buffer, Q, V, is_clip_decay, is_lr_decay)
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
@@ -439,8 +514,7 @@ class BPPO(PPO):
     def loss(
             self,
             replay_buffer,
-            Q1 = None,
-            Q2 = None,
+            Q = None,
             V = None,
             is_clip_decay = None,
             is_lr_decay = None
@@ -451,7 +525,7 @@ class BPPO(PPO):
         a = old_dist.rsample()
 
         with torch.no_grad():
-            min_Q = torch.min(Q1(state,a),Q2(state,a))
+            min_Q = Q(state,a).min(0).values
             advantage = min_Q - V(state)
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
