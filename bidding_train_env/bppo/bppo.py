@@ -260,6 +260,8 @@ class QP(QL):
     def __init__(self, dim_obs=16, dim_actions=1, hidden_dim=128, lr=1e-4, update_freq=200, tau=5e-3, gamma=0.99,
                  batch_size=4,device = 'cpu'):
         super().__init__(
+            dim_obs=dim_obs,
+            dim_actions=dim_actions,
             tau=tau,
             update_freq=update_freq,
             gamma=gamma,

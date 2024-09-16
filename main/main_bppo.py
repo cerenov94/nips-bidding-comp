@@ -16,6 +16,7 @@ if __name__ == "__main__":
     # Global hyperparameters
     parser.add_argument("--seed",default = 42,type=int)
     parser.add_argument('--device',default = 'cuda' if torch.cuda.is_available() else 'cpu',type=str)
+    parser.add_argument("--obs_state",default=16,type=int)
 
     # Value hyperparameters
     parser.add_argument("--value_steps",default=20000,type=int)
@@ -39,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("--bc_bs",default=32,type = int)
 
     # BPPO learning hyperparameters
-    parser.add_argument("--bppo_steps",default=14000,type = int)
+    parser.add_argument("--bppo_steps",default=18000,type = int)
     parser.add_argument("--bppo_hidden_dim",default=256,type = int,help="should be equal BC hidden dim")
     parser.add_argument("--bppo_lr",default=1e-4,type = float)
     parser.add_argument("--bppo_bs",default=16,type = int)
@@ -51,6 +52,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     run_bppo(
+        obs_state = args.obs_state,
         device = args.device,
         value_steps = args.value_steps,
         value_bs = args.value_bs,

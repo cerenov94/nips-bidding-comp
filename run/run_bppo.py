@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 
 def run_bppo(
+        obs_state,
         device,
         value_steps,
         value_bs,
@@ -36,6 +37,7 @@ def run_bppo(
 ):
 
     train_model(
+        obs_state,
         device,
         value_steps,
         value_bs,
@@ -64,6 +66,7 @@ def run_bppo(
 
 
 def train_model(
+        obs_state,
         device,
         value_steps,
         value_bs,
@@ -106,10 +109,10 @@ def train_model(
 
     rewards = training_data['reward_continuous'].values
     dones = training_data['done'].values
-    dones = np.split(dones, 336)
+    dones = np.split(dones, 1008)
 
     returns = []
-    for chunk, time_step in enumerate(np.split(rewards, 336)):
+    for chunk, time_step in enumerate(np.split(rewards, 1008)):
         r = 0
         current_return = np.zeros((48, 1))
         for i in reversed(range(len(time_step))):
@@ -125,7 +128,7 @@ def train_model(
     training_data['returns'] = norm_returns
 
     actions = training_data['action'].values
-    actions = np.split(actions, 336)
+    actions = np.split(actions, 1008)
     next_actions = []
     for a in actions:
         next_actions.append(np.append(a[1:], 0.))
@@ -148,6 +151,7 @@ def train_model(
     VL = Value(hidden_dim=value_hidden_dim,lr=value_lr,batch_size=value_bs,device=device)
 
     SARSA1 = QLSarsa(
+        dim_obs=obs_state,
         hidden_dim=qvalue_hidden_dim,
         lr = qvalue_lr,
         update_freq=qvalue_update_freq,
@@ -157,6 +161,7 @@ def train_model(
         device = device
     )
     SARSA2 = QLSarsa(
+        dim_obs=obs_state,
         hidden_dim=qvalue_hidden_dim,
         lr = qvalue_lr,
         update_freq=qvalue_update_freq,
@@ -166,6 +171,7 @@ def train_model(
         device = device
     )
     QPL1 = QP(
+        dim_obs=obs_state,
         hidden_dim=qvalue_hidden_dim,
         lr=qvalue_lr,
         update_freq=qvalue_update_freq,
@@ -175,6 +181,7 @@ def train_model(
         device=device
     )
     QPL2 = QP(
+        dim_obs=obs_state,
         hidden_dim=qvalue_hidden_dim,
         lr=qvalue_lr,
         update_freq=qvalue_update_freq,
@@ -184,12 +191,13 @@ def train_model(
         device=device
     )
     BCL = BC(
+        dim_obs=obs_state,
         hidden_dim=bc_hidden_dim,
         lr = bc_lr,
         batch_size=bc_bs,
         device = device
     )
-    BPPOL = BPPO(hidden_dim=bppo_hidden_dim,lr=bppo_lr,batch_size = bppo_bs,device = device,clip_ratio=0.1)
+    BPPOL = BPPO(dim_obs=obs_state,hidden_dim=bppo_hidden_dim,lr=bppo_lr,batch_size = bppo_bs,device = device,clip_ratio=0.1)
 
     VALUE_STEPS = value_steps
     SARSA_STEPS = qvalue_steps
@@ -230,13 +238,13 @@ def train_model(
 
     BPPOL.policy.load_state_dict(BCL.policy.state_dict())
     BPPOL.old_policy.load_state_dict(BCL.policy.state_dict())
-
+    #BPPOL.load_weights('/home/cerenov/PROJECTS/rlcomp/NeurIPS_Auto_Bidding_General_Track_Baseline/saved_model/BPPOtest/bestbppo.pth')
     QQ1 = SARSA1
     QQ2 = SARSA2
 
     best_score = float('inf')
-    test_chunks = [305]
-    chunks = np.split(training_data, 336)
+    test_chunks = [93]
+    chunks = np.split(training_data, 1008)
     delta = 1e-2
     for step in tqdm(range(BPPO_STEPS)):
         if step > 200:
@@ -261,7 +269,7 @@ def train_model(
         # QQ1 = QPL1
         # QQ2 = QPL2
 
-        print(f'Step: {step},loss: {loss:.4f},best score : {best_score:.4f},approx kl:{approx_kl:.4f}')
+        print(f'Step: {step},loss: {loss:.4f},current_score:{np.mean(scores_for_chunks):.4f}, best score : {best_score:.4f},approx kl:{approx_kl:.4f}')
         #if approx_kl < delta:
         #    break
 
