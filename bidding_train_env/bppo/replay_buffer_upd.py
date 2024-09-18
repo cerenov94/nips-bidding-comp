@@ -2,7 +2,7 @@ import random
 from collections import namedtuple
 import numpy as np
 import torch
-
+from operator import itemgetter
 
 
 Experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state","next_action","done","G"])
@@ -16,6 +16,7 @@ class ReplayBuffer:
     def __init__(self,device = 'cpu'):
         self.memory = []
         self.device = device
+        self.valid_memory = []
 
     def push(self, state, action, reward, next_state,next_action,done,G):
         """saving an experience tuple"""
@@ -27,7 +28,7 @@ class ReplayBuffer:
         if random_samples:
             tem = random.sample(self.memory, batch_size)
         else:
-            tem = self.memory[ids[0]:ids[-1]]
+            tem = self.valid_memory[:]
         states, actions, rewards, next_states,next_action,dones,G = zip(*tem)
         states, actions, rewards, next_states,next_action,dones,G = np.stack(states), np.stack(actions), np.stack(rewards), np.stack(
             next_states),np.stack(next_action),np.stack(dones),np.stack(G)
@@ -46,3 +47,7 @@ class ReplayBuffer:
     def __len__(self):
         """return the length of replay buffer"""
         return len(self.memory)
+
+    def split_memory(self):
+        self.valid_memory = self.memory[12576:12624]
+        self.memory = self.memory[:12576] + self.memory[12624:]

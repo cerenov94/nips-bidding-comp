@@ -106,10 +106,10 @@ def train_model(
 
     rewards = training_data['reward_continuous'].values
     dones = training_data['done'].values
-    dones = np.split(dones, 336)
+    dones = np.split(dones, 1008)
 
     returns = []
-    for chunk, time_step in enumerate(np.split(rewards, 336)):
+    for chunk, time_step in enumerate(np.split(rewards, 1008)):
         r = 0
         current_return = np.zeros((48, 1))
         for i in reversed(range(len(time_step))):
@@ -125,7 +125,7 @@ def train_model(
     training_data['returns'] = norm_returns
 
     actions = training_data['action'].values
-    actions = np.split(actions, 336)
+    actions = np.split(actions, 1008)
     next_actions = []
     for a in actions:
         next_actions.append(np.append(a[1:], 0.))
@@ -143,6 +143,8 @@ def train_model(
     #np.save('saved_model/BPPOtest/min_action.npy',action_mean)
     #training_data['action'] = (training_data['action'] - action_mean)/action_std
     add_to_replay_buffer(replay_buffer, training_data, True)
+    replay_buffer.split_memory()
+    print('train size',len(replay_buffer))
 
 
     VL = Value(hidden_dim=value_hidden_dim,lr=value_lr,batch_size=value_bs,device=device)
@@ -235,36 +237,46 @@ def train_model(
     QQ2 = SARSA2
 
     best_score = float('inf')
-    test_chunks = [305]
-    chunks = np.split(training_data, 336)
+    test_chunks = [93]
+    chunks = np.split(training_data, 1008)
     delta = 1e-2
+
+
     for step in tqdm(range(BPPO_STEPS)):
         if step > 200:
             is_clip_decay = False
             is_bppo_lr_decay = False
 
         loss,approx_kl = BPPOL.train(replay_buffer, QQ1,QQ2, VL, is_clip_decay, is_bppo_lr_decay)
-        scores_for_chunks = []
-        for chunk_id in test_chunks:
-            ids = np.array(chunks[chunk_id].index)
-            state, action, _, _, _, _, _ = replay_buffer.sample(48,random_samples = False,ids = ids)
-            pred_action = BPPOL.get_action(state)
-            current_score = F.l1_loss(pred_action.to(device), action).detach().cpu().numpy()
-            scores_for_chunks.append(current_score)
-        if np.mean(scores_for_chunks) < best_score:
-           best_score = np.mean(scores_for_chunks)
+        state, action, _, _, _, _, _ = replay_buffer.sample(48,random_samples = False,ids = None)
+        pred_action = BPPOL.get_action(state)
+        current_score = F.l1_loss(pred_action.to(device), action).detach().cpu().numpy()
+        if current_score < best_score:
+           best_score = current_score
            BPPOL.old_policy.load_state_dict(BPPOL.policy.state_dict())
 
-        # for i in range(20):
+        # for i in range(2):
         #     q_loss1 = QPL1.train(replay_buffer, BPPOL)
         #     q_loss2 = QPL2.train(replay_buffer, BPPOL)
         # QQ1 = QPL1
         # QQ2 = QPL2
 
-        print(f'Step: {step},loss: {loss:.4f},best score : {best_score:.4f},approx kl:{approx_kl:.4f}')
+        print(f'Step: {step},loss: {loss:.4f},current score: {current_score:.4f}, best score : {best_score:.4f},approx kl:{approx_kl:.4f}')
         #if approx_kl < delta:
         #    break
-
+    state, actions, _, _, _, _, _ = replay_buffer.sample(50, random_samples=False, ids=None)
+    pred_actions = BPPOL.get_action(state)
+    tem = np.concatenate((actions.cpu().numpy(), pred_actions.numpy()), axis=1)
+    print("DETERMINISTIC POLICY")
+    print("action VS pred action:", tem)
+    print(f'mean deviation: {np.abs(actions.cpu().numpy() - pred_actions.numpy()).mean():.4f}')
+    print("-----------------------")
+    print("DETERMINISTIC OLD POLICY")
+    with torch.inference_mode():
+        pred_actions = BPPOL.old_policy.det_action(state)
+    tem = np.concatenate((actions.cpu().numpy(), pred_actions.detach().cpu().numpy()), axis=1)
+    print("action VS pred action:", tem)
+    print(f'mean deviation: {np.abs(actions.cpu().numpy() - pred_actions.detach().cpu().numpy()).mean():.4f}')
     BPPOL.save_weights()
 
 

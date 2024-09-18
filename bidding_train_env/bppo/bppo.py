@@ -122,7 +122,7 @@ class Policy(nn.Module):
             layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.ReLU(),
             layer_init(nn.Linear(hidden_dim,hidden_dim)),
-            nn.ReLU()
+            nn.ReLU(),
         )
         self.mu = layer_init(nn.Linear(hidden_dim,actions_dim))
         self.std = layer_init(nn.Linear(hidden_dim,actions_dim))
@@ -260,6 +260,8 @@ class QP(QL):
     def __init__(self, dim_obs=16, dim_actions=1, hidden_dim=128, lr=1e-4, update_freq=200, tau=5e-3, gamma=0.99,
                  batch_size=4,device = 'cpu'):
         super().__init__(
+            dim_obs = dim_obs,
+            dim_actions=dim_actions,
             tau=tau,
             update_freq=update_freq,
             gamma=gamma,
@@ -327,6 +329,7 @@ class BC:
 
     def loss(self, replay_buffer):
         state, action, reward, next_state, next_action, not_done, G = replay_buffer.sample(self.batch_size)
+
 
         pdf = self.policy.get_pdf(state)
         log_prob = pdf.log_prob(action)
@@ -485,11 +488,13 @@ class BPPO(PPO):
 
         return loss,approx_kl
 
-    def save_weights(self, save_path = "saved_model/BPPOtest"):
+    def save_weights(self, save_path = "saved_model/BPPOtest",old = False):
         if not os.path.isdir(save_path):
             os.makedirs(save_path)
-
-        torch.save(self.policy.to('cpu').state_dict(), f'{save_path}/bppo_model.pth')
+        if old:
+            torch.save(self.old_policy.to('cpu').state_dict(), f'{save_path}/bppo_model.pth')
+        else:
+            torch.save(self.policy.to('cpu').state_dict(), f'{save_path}/bppo_model.pth')
 
     def load_weights(self,load_path = 'saved_model/BPPOtest'):
         self.policy.load_state_dict(torch.load(load_path,map_location='cpu'))
