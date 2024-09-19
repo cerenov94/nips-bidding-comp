@@ -1,3 +1,5 @@
+from sched import scheduler
+
 import torch
 import torch.nn as nn
 from torch.distributions import  Normal
@@ -122,7 +124,7 @@ class Policy(nn.Module):
             layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.ReLU(),
             layer_init(nn.Linear(hidden_dim,hidden_dim)),
-            nn.ReLU(),
+            nn.Tanh(),
         )
         self.mu = layer_init(nn.Linear(hidden_dim,actions_dim))
         self.std = layer_init(nn.Linear(hidden_dim,actions_dim))
@@ -146,12 +148,13 @@ class Policy(nn.Module):
 
 
 class Value:
-    def __init__(self, dim_obs=16, hidden_dim=64, lr=1e-4, batch_size=4,device = 'cpu'):
+    def __init__(self, dim_obs=16, hidden_dim=64, lr=1e-4, batch_size=4,device = 'cpu',expectile = 0.7):
         super().__init__()
-
-        self.value_net = V(dim_obs, hidden_dim).to(device)
+        self.device = device
+        self.value_net = V(dim_obs, hidden_dim).to(self.device)
         self.optimizer = torch.optim.Adam(self.value_net.parameters(), lr=lr)
         self.batch_size = batch_size
+        self.expectile = expectile
 
     def __call__(self, state):
         return self.value_net(state)
@@ -164,7 +167,7 @@ class Value:
             min_Q = torch.min(q1,q2)
         value = self.value_net(state)
 
-        loss = self.l2_loss(min_Q-value,0.7).mean()
+        loss = self.l2_loss(min_Q-value,self.expectile).mean()
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -173,6 +176,15 @@ class Value:
     def l2_loss(self, diff, expectile=0.8):
         weight = torch.where(diff > 0, expectile, (1 - expectile))
         return weight * diff.pow(2)
+
+    def save_weights(self, save_path = "saved_model/BPPOtest",):
+        if not os.path.isdir(save_path):
+            os.makedirs(save_path)
+        torch.save(self.value_net.to('cpu').state_dict(), f'{save_path}/value_model.pth')
+
+    def load_weights(self,load_path = 'saved_model/BPPOtest'):
+        self.value_net.load_state_dict(torch.load(load_path,map_location='cpu'))
+        self.value_net.to(self.device)
 
 
 class QL:
@@ -189,8 +201,9 @@ class QL:
             device = 'cpu'
     ):
         super().__init__()
-        self.Q = Q(dim_obs, dim_actions, hidden_dim).to(device)
-        self.target_Q = Q(dim_obs, dim_actions, hidden_dim).to(device)
+        self.device = device
+        self.Q = Q(dim_obs, dim_actions, hidden_dim).to(self.device)
+        self.target_Q = Q(dim_obs, dim_actions, hidden_dim).to(self.device)
         self.target_Q.load_state_dict(self.Q.state_dict())
         self.optimizer = torch.optim.Adam(self.Q.parameters(), lr=lr)
         self.update_freq = update_freq
@@ -220,6 +233,17 @@ class QL:
 
         return q_loss.item()
 
+    def save_weights(self, save_path = "saved_model/BPPOtest",name = "Q1"):
+        if not os.path.isdir(save_path):
+            os.makedirs(save_path)
+        torch.save(self.Q.to('cpu').state_dict(), f'{save_path}/{name}.pth')
+
+    def load_weights(self,load_path = 'saved_model/BPPOtest'):
+        self.Q.load_state_dict(torch.load(load_path,map_location='cpu'))
+        self.target_Q.load_state_dict(torch.load(load_path,map_location='cpu'))
+        self.Q.to(self.device)
+        self.target_Q.to(self.device)
+
 
 class QLSarsa(QL):
     def __init__(
@@ -232,11 +256,22 @@ class QLSarsa(QL):
             tau=5e-3,
             gamma=0.99,
             batch_size=4,
-            device = 'cpu'
+            device = 'cpu',
+
     ):
-        super().__init__()
-        self.Q = Q(dim_obs, dim_actions, hidden_dim).to(device)
-        self.target_Q = Q(dim_obs, dim_actions, hidden_dim).to(device)
+        super().__init__(
+            dim_obs=dim_obs,
+            dim_actions=dim_actions,
+            hidden_dim=hidden_dim,
+            lr=lr,
+            update_freq=update_freq,
+            tau=tau,
+            gamma=gamma,
+            batch_size=batch_size,
+            device=device
+        )
+        self.Q = Q(dim_obs, dim_actions, hidden_dim).to(self.device)
+        self.target_Q = Q(dim_obs, dim_actions, hidden_dim).to(self.device)
         self.target_Q.load_state_dict(self.Q.state_dict())
         self.optimizer = torch.optim.Adam(self.Q.parameters(), lr=lr)
         self.update_freq = update_freq
@@ -352,7 +387,7 @@ class BC:
 
 class PPO:
     def __init__(self, dim_obs=16, dim_actions=1, hidden_dim=64, lr=1e-4, clip_ratio=0.25, entropy=0., decay=0.96,
-                 omega=0.9, batch_size=4,device = 'cpu'):
+                 omega=0.9, batch_size=4,device = 'cpu',):
         super().__init__()
         self.policy = Policy(dim_obs, dim_actions, hidden_dim).to(device)
         self.lr = lr
@@ -426,13 +461,14 @@ class PPO:
 
 class BPPO(PPO):
     def __init__(self, dim_obs=16, dim_actions=1, hidden_dim=64, lr=1e-4, clip_ratio=0.25, entropy=0., decay=0.96,
-                 omega=0.9, batch_size=32,device = 'cpu'):
+                 omega=0.9, batch_size=32,device = 'cpu',n_steps = 14000):
         super().__init__()
         self.policy = Policy(dim_obs, dim_actions, hidden_dim).to(device)
         self.lr = lr
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
         self.old_policy = deepcopy(self.policy).to(device)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=2, gamma=0.98)
+        #self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=2, gamma=0.98)
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,T_max=n_steps,eta_min=0.0)
         self.clip_ratio = clip_ratio
         self.decay = decay
         self.omega = omega
@@ -458,7 +494,7 @@ class BPPO(PPO):
             advantage = min_Q - V(state)
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-        #advantage = self.weighted_advantage(advantage)
+        # = self.weighted_advantage(advantage)
 
         new_dist = self.policy.get_pdf(state)
 

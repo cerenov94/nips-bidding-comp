@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 
 
-def normalize_state(training_data, state_dim, normalize_indices):
+def normalize_state(training_data, state_dim, normalize_indices,train = True,normalize_dict = None):
     """
     Normalize features for reinforcement learning.
     Args:
@@ -23,16 +23,18 @@ def normalize_state(training_data, state_dim, normalize_indices):
             lambda x: x[i] if x is not None and not np.isnan(x).any() else 0.0)
         training_data[next_state_col] = training_data['next_state'].apply(
             lambda x: x[i] if x is not None and not np.isnan(x).any() else 0.0)
-
-    stats = {
-        i: {
-            'min': training_data[state_columns[i]].min(),
-            'max': training_data[state_columns[i]].max(),
-            'mean': training_data[state_columns[i]].mean(),
-            'std': training_data[state_columns[i]].std()
+    if train:
+        stats = {
+            i: {
+                'min': training_data[state_columns[i]].min(),
+                'max': training_data[state_columns[i]].max(),
+                'mean': training_data[state_columns[i]].mean(),
+                'std': training_data[state_columns[i]].std()
+            }
+            for i in normalize_indices
         }
-        for i in normalize_indices
-    }
+    else:
+        stats = normalize_dict
 
     for state_col, next_state_col in zip(state_columns, next_state_columns):
         if int(state_col.replace('state', '')) in normalize_indices:
@@ -40,10 +42,10 @@ def normalize_state(training_data, state_dim, normalize_indices):
             max_val = stats[int(state_col.replace('state', ''))]['max']
             training_data[f'normalize_{state_col}'] = (
                                                               training_data[state_col] - min_val) / (
-                                                              max_val - min_val + 0.01)
+                                                              max_val - min_val + 1e-8)
             training_data[f'normalize_{next_state_col}'] = (
                                                                    training_data[next_state_col] - min_val) / (
-                                                                   max_val - min_val + 0.01)
+                                                                   max_val - min_val + 1e-8)
             # 0.01 error too large?
         else:
             training_data[f'normalize_{state_col}'] = training_data[state_col]
@@ -69,10 +71,11 @@ def normalize_reward(training_data, reward_type):
         A Series of normalized rewards.
     """
     reward_range = training_data[reward_type].max() - training_data[reward_type].min() + 0.00000001
+    min_reward = training_data[reward_type].min()
     training_data["normalize_reward"] = (
                                                 training_data[reward_type] - training_data[
                                             reward_type].min()) / reward_range
-    return training_data["normalize_reward"]
+    return training_data["normalize_reward"],min_reward,reward_range
 
 
 def save_normalize_dict(normalize_dict, save_dir):

@@ -16,19 +16,19 @@ class ReplayBuffer:
     def __init__(self,device = 'cpu'):
         self.memory = []
         self.device = device
-        self.valid_memory = []
+
 
     def push(self, state, action, reward, next_state,next_action,done,G):
         """saving an experience tuple"""
         experience = Experience(state, action, reward, next_state, next_action,done,G)
         self.memory.append(experience)
 
-    def sample(self, batch_size,random_samples = True,ids = None):
+    def sample(self, batch_size,random_samples = True):
         """randomly sampling a batch of experiences"""
         if random_samples:
             tem = random.sample(self.memory, batch_size)
         else:
-            tem = self.valid_memory[:]
+            tem = self.memory[:]
         states, actions, rewards, next_states,next_action,dones,G = zip(*tem)
         states, actions, rewards, next_states,next_action,dones,G = np.stack(states), np.stack(actions), np.stack(rewards), np.stack(
             next_states),np.stack(next_action),np.stack(dones),np.stack(G)
@@ -48,6 +48,9 @@ class ReplayBuffer:
         """return the length of replay buffer"""
         return len(self.memory)
 
-    def split_memory(self):
-        self.valid_memory = self.memory[12576:12624]
-        self.memory = self.memory[:12576] + self.memory[12624:]
+    # def split_memory(self,flag = True):
+    #     if flag:
+    #         self.valid_memory = self.memory[12576:12624]
+    #         self.memory = self.memory[:12576] + self.memory[12624:]
+    #     else:
+    #         self.valid_memory = self.memory[12576:12624]
