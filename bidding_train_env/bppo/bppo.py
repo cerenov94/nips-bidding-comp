@@ -43,33 +43,31 @@ class VectorizedCritic(nn.Module):
         self, state_dim: int, action_dim: int, hidden_dim: int, num_critics: int
     ):
         super().__init__()
+
+        self.obs_emb = layer_init(VectorizedLinear(state_dim,hidden_dim,num_critics))
+        self.act_emb = layer_init(VectorizedLinear(action_dim,hidden_dim,num_critics))
         self.critic = nn.Sequential(
-            VectorizedLinear(state_dim + action_dim, hidden_dim, num_critics),
-            nn.ReLU(),
             VectorizedLinear(hidden_dim, hidden_dim, num_critics),
             nn.ReLU(),
-            VectorizedLinear(hidden_dim, hidden_dim, num_critics),
+            layer_init(VectorizedLinear(hidden_dim, hidden_dim, num_critics)),
             nn.ReLU(),
-            VectorizedLinear(hidden_dim, 1, num_critics),
+            VectorizedLinear(hidden_dim, 1, num_critics)
         )
-        # init as in the EDAC paper
-        for layer in self.critic[::2]:
-            torch.nn.init.constant_(layer.bias, 0.1)
-
-        torch.nn.init.uniform_(self.critic[-1].weight, -3e-3, 3e-3)
-        torch.nn.init.uniform_(self.critic[-1].bias, -3e-3, 3e-3)
-
         self.num_critics = num_critics
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         # [..., batch_size, state_dim + action_dim]
-        state_action = torch.cat([state, action], dim=-1)
-        if state_action.dim() != 3:
-            assert state_action.dim() == 2
-            # [num_critics, batch_size, state_dim + action_dim]
-            state_action = state_action.unsqueeze(0).repeat_interleave(
-                self.num_critics, dim=0
-            )
+        # [num_critics, batch_size, state_dim + action_dim]
+        state = state.unsqueeze(0).repeat_interleave(self.num_critics, dim=0)
+        action = action.unsqueeze(0).repeat_interleave(self.num_critics, dim=0)
+        assert state.dim() == 3
+        assert state.shape[0] == self.num_critics
+
+
+        state = self.obs_emb(state)
+        action = self.act_emb(action)
+        state_action = torch.cat([state,action],dim=-1)
+
         assert state_action.dim() == 3
         assert state_action.shape[0] == self.num_critics
         # [num_critics, batch_size]
@@ -83,10 +81,13 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class V(nn.Module):
-    def __init__(self ,state ,hidden_dim):
+    def __init__(self ,state ,hidden_dim,activation = 'tanh'):
         super().__init__()
         self.linear1 = layer_init(nn.Linear(state ,hidden_dim * 2))
-        self.activation = nn.Tanh()
+        if activation == 'tanh':
+            self.activation = nn.Tanh()
+        else:
+            self.activation = nn.ReLU()
         self.linear2 = layer_init(nn.Linear(hidden_dim * 2,hidden_dim))
         self.linear3 = layer_init(nn.Linear(hidden_dim ,hidden_dim))
         self.linear4 = layer_init(nn.Linear(hidden_dim,1))
@@ -96,9 +97,12 @@ class V(nn.Module):
         return value
 
 class Q(nn.Module):
-    def __init__(self ,state ,action ,hidden_dim):
+    def __init__(self ,state ,action ,hidden_dim,activation = 'relu'):
         super().__init__()
-
+        if activation == 'relu':
+            self.activation = nn.ReLU()
+        else:
+            self.activation = nn.Tanh()
         self.obs_emb = layer_init(nn.Linear(state,hidden_dim))
         self.act_emb = layer_init(nn.Linear(action,hidden_dim))
         self.linear1 = layer_init(nn.Linear(hidden_dim * 2,hidden_dim))
@@ -109,15 +113,20 @@ class Q(nn.Module):
         state = self.obs_emb(state)
         action = self.act_emb(action)
         sa = torch.cat([state,action],dim=-1)
-        qv = self.linear3(F.relu(self.linear2(F.relu(self.linear1(sa)))))
+        qv = self.linear3(self.activation(self.linear2(self.activation(self.linear1(sa)))))
         return qv
 
 
 class Policy(nn.Module):
-    def __init__(self, dim_obs=16, actions_dim=1, hidden_dim=64):
+    def __init__(self, dim_obs=16, actions_dim=1, hidden_dim=64,activation = 'relu'):
         super().__init__()
         self.min_log_std = -10
         self.max_logs_std = 2
+        if activation == 'relu':
+            self.activation = nn.ReLU()
+        else:
+            self.activation = nn.Tanh()
+
         self.net = nn.Sequential(
             layer_init(nn.Linear(dim_obs, hidden_dim)),
             nn.ReLU(),
@@ -362,17 +371,23 @@ class BC:
         self.batch_size = batch_size
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
 
-    def loss(self, replay_buffer):
+    def loss(self, replay_buffer,Q1,Q2,V):
         state, action, reward, next_state, next_action, not_done, G = replay_buffer.sample(self.batch_size)
-
+        with torch.no_grad():
+            v = V(state)
+            q1 = Q1(state,action)
+            q2 = Q2(state,action)
+            min_Q = torch.min(q1,q2)
+        exp_a = torch.exp(min_Q - v) * 3
+        exp_a = torch.min(exp_a,torch.FloatTensor([100.0]).to(exp_a.device))
 
         pdf = self.policy.get_pdf(state)
         log_prob = pdf.log_prob(action)
-        loss = (-log_prob).mean()
+        loss =  -(log_prob * exp_a).mean()
         return loss
 
-    def train(self, replay_buffer):
-        loss = self.loss(replay_buffer)
+    def train(self, replay_buffer,Q1,Q2,V):
+        loss = self.loss(replay_buffer,Q1,Q2,V)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()

@@ -11,9 +11,11 @@ from tqdm import tqdm
 import torch.nn.functional as F
 import os
 import random
+from sklearn.model_selection import KFold
 
 def run_bppo(
         seed,
+        with_validation,
         learn_value,
         device,
         value_steps,
@@ -42,11 +44,11 @@ def run_bppo(
 ):
 
     scores = []
-    for i in range(5):
-        np.random.seed()
-        validation_indexes = np.random.choice(1008, 200, replace=False, )
+    kf = KFold(5,shuffle=True,random_state=42)
+    for _,validation_indexes in kf.split(np.arange(1008)):
         score = train_model(
             seed,
+            with_validation,
             learn_value,
             device,
             value_steps,
@@ -75,6 +77,38 @@ def run_bppo(
             validation_indexes
         )
         scores.append(score)
+
+    # validation_indexes = np.random.choice(1008, 200, replace=False, )
+    # scores = train_model(
+    #     seed,
+    #     with_validation,
+    #     learn_value,
+    #     device,
+    #     value_steps,
+    #     value_bs,
+    #     value_lr,
+    #     value_hidden_dim,
+    #     v_expect,
+    #     qvalue_steps,
+    #     qvalue_bs,
+    #     qvalue_hidden_dim,
+    #     qvalue_lr,
+    #     qvalue_update_freq,
+    #     qvalue_tau,
+    #     qvalue_gamma,
+    #     bc_steps,
+    #     bc_hidden_dim,
+    #     bc_lr,
+    #     bc_bs,
+    #     bppo_steps,
+    #     bppo_lr,
+    #     bppo_bs,
+    #     is_clip_decay,
+    #     is_bppo_lr_decay,
+    #     clip_ratio,
+    #     omega,
+    #     validation_indexes
+    # )
     return np.mean(scores)
 
 
@@ -82,6 +116,7 @@ def run_bppo(
 
 def train_model(
         seed,
+        with_validation,
         learn_value:bool,
         device,
         value_steps,
@@ -171,7 +206,7 @@ def train_model(
 
 
     valid_data = training_data.loc[valid_indexes].reset_index(drop = True)
-    WITH_VALIDATION = True
+    WITH_VALIDATION = with_validation
     if WITH_VALIDATION:
         training_data = training_data.drop(valid_indexes).reset_index(drop = True)
 
@@ -279,7 +314,7 @@ def train_model(
 
     # behaviour clone learn
     for step in tqdm(range(BC_STEPS)):
-        loss = BCL.train(replay_buffer)
+        loss = BCL.train(replay_buffer,SARSA1,SARSA2,VL)
 
         if step % 200 == 0:
             print(f'Step: {step},Loss: {loss:.4f}')
@@ -298,25 +333,29 @@ def train_model(
     #delta = 1e-2
 
 
+    current_score = 0
     for step in tqdm(range(BPPO_STEPS)):
         if step > 200:
             is_clip_decay = False
             #is_bppo_lr_decay = False
 
         loss,approx_kl = BPPOL.train(replay_buffer, QQ1,QQ2, VL, is_clip_decay, is_bppo_lr_decay)
-        state, action, reward, next_state, next_action, not_done, G= valid_replay_buffer.sample(1024,random_samples = True)
+        if step % 200 == 0:
+            state, action, reward, next_state, next_action, not_done, G= valid_replay_buffer.sample(1024,random_samples = False)
 
-        #current_score = F.l1_loss(pred_action.to(device), action).detach().cpu().numpy()
-        with torch.no_grad():
-            min_Q = torch.min(QQ1(state, action),QQ2(state, action))
-            pdf = BPPOL.policy.get_pdf(next_state)
-            next_action_pred = pdf.rsample()
-            target_min_Q = torch.min(QQ1(next_state,next_action_pred),QQ2(next_state,next_action_pred))
+            #current_score = F.l1_loss(pred_action.to(device), action).detach().cpu().numpy()
+            with torch.no_grad():
+                min_Q = torch.min(QQ1(state, action), QQ2(state, action))
+                pdf = BPPOL.policy.get_pdf(next_state)
+                next_action_pred = pdf.rsample()
+                next_action_pred = next_action_pred.to(next_state.device)
+                target_min_Q = torch.min(QQ1(next_state, next_action_pred), QQ2(next_state, next_action_pred))
 
-        current_score = ((min_Q - (reward + (1-not_done) * qvalue_gamma * target_min_Q)).pow(2)).mean().cpu().numpy()
-        if current_score < best_score:
-           best_score = current_score
-           BPPOL.old_policy.load_state_dict(BPPOL.policy.state_dict())
+
+            current_score =((min_Q - (reward + (1-not_done) * qvalue_gamma * target_min_Q)).pow(2)).mean()
+            if current_score < best_score:
+                best_score = current_score
+                BPPOL.old_policy.load_state_dict(BPPOL.policy.state_dict())
 
         # for i in range(2):
         #     q_loss1 = QPL1.train(replay_buffer, BPPOL)
@@ -330,9 +369,9 @@ def train_model(
 
     state, actions, reward, next_state, next_action, not_done, G= valid_replay_buffer.sample(48, random_samples=False)
     pred_actions = BPPOL.get_action(state)
-    tem = np.concatenate((actions.cpu().numpy(), pred_actions.numpy()), axis=1)
+    tem = np.concatenate((actions.cpu().numpy(), pred_actions.numpy(),reward.cpu().numpy()), axis=1)
     print("DETERMINISTIC POLICY")
-    print("action VS pred action:", tem)
+    print("action | pred action | reward:", tem)
     with torch.no_grad():
         min_Q = torch.min(QQ1(state, actions), QQ2(state, actions))
         next_action_pred = BPPOL.get_action(next_state)
@@ -347,7 +386,7 @@ def train_model(
 
 
     logs = torch.load('train_logs/logs.pth')
-    best_score = logs['min_valid_action_deviation']
+    best_score = float('inf')
 
     print(f'value score: {score:.5f}, mean deviation action: {score_action:.4f}')
     if score < best_score:

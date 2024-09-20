@@ -54,7 +54,6 @@ def run_test():
         if agent.remaining_budget < env.min_remaining_budget:
             bid = np.zeros(pValue.shape[0])
         else:
-
             bid = agent.bidding(timeStep_index, pValue, pValueSigma, history["historyPValueInfo"],
                                 history["historyBids"],
                                 history["historyAuctionResult"], history["historyImpressionResult"],
