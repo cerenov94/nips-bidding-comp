@@ -23,7 +23,7 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
         dir_name = os.path.dirname(dir_name)
         model_path = os.path.join(dir_name,"saved_model","BPPOtest","bppo_model.pth")
         dict_path = os.path.join(dir_name,"saved_model","BPPOtest","normalize_dict.pkl")
-        self.model = BPPO(hidden_dim=128)
+        self.model = BPPO(hidden_dim=192)
         self.model.load_weights(model_path)
         with open(dict_path, 'rb') as file:
             self.normalize_dict = pickle.load(file)
@@ -112,5 +112,6 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
         #alpha = alpha.cpu().numpy()
         #alpha = np.clip(alpha,0,float('inf'))
         bids = alpha.numpy() * pValues
+
 
         return bids

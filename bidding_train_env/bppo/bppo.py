@@ -43,31 +43,34 @@ class VectorizedCritic(nn.Module):
         self, state_dim: int, action_dim: int, hidden_dim: int, num_critics: int
     ):
         super().__init__()
-
-        self.obs_emb = layer_init(VectorizedLinear(state_dim,hidden_dim,num_critics))
-        self.act_emb = layer_init(VectorizedLinear(action_dim,hidden_dim,num_critics))
+        self.obs_emb = VectorizedLinear(state_dim,hidden_dim,num_critics)
+        self.act_emb = VectorizedLinear(action_dim,hidden_dim,num_critics)
         self.critic = nn.Sequential(
+            layer_init(VectorizedLinear(hidden_dim * 2, hidden_dim, num_critics)),
+            nn.ReLU(),
             VectorizedLinear(hidden_dim, hidden_dim, num_critics),
             nn.ReLU(),
-            layer_init(VectorizedLinear(hidden_dim, hidden_dim, num_critics)),
-            nn.ReLU(),
-            VectorizedLinear(hidden_dim, 1, num_critics)
+            layer_init(VectorizedLinear(hidden_dim, 1, num_critics)),
         )
+        torch.nn.init.uniform_(self.critic[-1].weight, -3e-3, 3e-3)
+        torch.nn.init.uniform_(self.critic[-1].bias, -3e-3, 3e-3)
+
         self.num_critics = num_critics
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         # [..., batch_size, state_dim + action_dim]
-        # [num_critics, batch_size, state_dim + action_dim]
-        state = state.unsqueeze(0).repeat_interleave(self.num_critics, dim=0)
-        action = action.unsqueeze(0).repeat_interleave(self.num_critics, dim=0)
-        assert state.dim() == 3
-        assert state.shape[0] == self.num_critics
-
+        #state_action = torch.cat([state, action], dim=-1)
+        #state_action = None
+        if state.dim() != 3 and action.dim() != 3:
+            assert state.dim() == 2 and action.dim() == 2
+            # [num_critics, batch_size, state_dim + action_dim]
+            state = state.unsqueeze(0).repeat_interleave(self.num_critics, dim=0)
+            action = action.unsqueeze(0).repeat_interleave(self.num_critics, dim=0)
 
         state = self.obs_emb(state)
         action = self.act_emb(action)
         state_action = torch.cat([state,action],dim=-1)
-
+        #print(state_action.shape)
         assert state_action.dim() == 3
         assert state_action.shape[0] == self.num_critics
         # [num_critics, batch_size]
@@ -168,15 +171,13 @@ class Value:
     def __call__(self, state):
         return self.value_net(state)
 
-    def train(self, replay_buffer,Q1,Q2):
+    def train(self, replay_buffer,Q1):
         state, action, reward, next_state, next_action, not_done, G = replay_buffer.sample(self.batch_size)
         with torch.no_grad():
-            q1 = Q1(state,action)
-            q2 = Q2(state,action)
-            min_Q = torch.min(q1,q2)
+            min_Q = Q1(state,action).min(0).values
         value = self.value_net(state)
 
-        loss = self.l2_loss(min_Q-value,self.expectile).mean()
+        loss = self.l2_loss(min_Q.view(1,-1)-value,self.expectile).mean()
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -339,7 +340,8 @@ class QLVect(QL):
             gamma=0.99,
             batch_size=4,
             num_critics = 10,
-            device = 'cpu'
+            device = 'cpu',
+            eta = 1.0
     ):
         super().__init__()
         self.Q = VectorizedCritic(state_dim=dim_obs,action_dim=dim_actions,hidden_dim=hidden_dim,num_critics=num_critics).to(device)
@@ -351,34 +353,65 @@ class QLVect(QL):
         self.gamma = gamma
         self.batch_size = batch_size
         self.update_counter = 0
+        self.eta = eta
+        self.num_critics = num_critics
+        self.device = device
 
     def loss(self, replay_buffer, p=None,V = None):
         state, action, reward, next_state, next_action, done, G = replay_buffer.sample(self.batch_size)
         with torch.no_grad():
-            #q_target_value = reward + (1 - done) * self.gamma * self.target_Q(next_state, next_action)
+            #q_target_value = reward + (1 - done) * self.gamma * self.target_Q(next_state, next_action).min(0).values.unsqueeze(dim= - 1)
             q_target_value = reward + (1 - done) * self.gamma * V(next_state)
         q_value = self.Q(state, action)
-        loss = F.mse_loss(q_value, q_target_value)
-
+        loss = (q_value - q_target_value.view(1,-1)).pow(2).mean(dim = 1).sum(dim = 0)
+        diversity_loss = self.critic_diversity_loss(state, action)
+        loss = loss + self.eta * diversity_loss
         return loss
+
+    def critic_diversity_loss(
+            self,
+            state,
+            action
+    ):
+        num_critics = self.num_critics
+        state = state.unsqueeze(dim=0).repeat_interleave(num_critics,dim=0)
+        action = (
+            action.unsqueeze(dim=0).repeat_interleave(num_critics,dim=0).requires_grad_(True)
+        )
+        q_values = self.Q(state,action)
+
+
+        q_action_grad = torch.autograd.grad(
+            q_values.sum(),action,retain_graph=True,create_graph=True,
+        )[0]
+
+        q_action_grad = q_action_grad/(torch.norm(q_action_grad,p=2,dim=2).unsqueeze(-1) + 1e-10)
+        q_action_grad = q_action_grad.transpose(0, 1)
+        masks = (torch.eye(num_critics,device=self.device).unsqueeze(dim=0).repeat(q_action_grad.shape[0],1,1))
+
+        q_action_grad = q_action_grad @ q_action_grad.permute(0,2,1)
+        q_action_grad = (1 - masks) * q_action_grad
+
+        grad_loss = q_action_grad.sum(dim=(1,2)).mean()
+        grad_loss = grad_loss / (num_critics - 1)
+
+        return grad_loss
 
 
 class BC:
-    def __init__(self, dim_obs=16, dim_actions=1, hidden_dim=64, lr=1e-4, batch_size=4,device = 'cpu'):
+    def __init__(self, dim_obs=16, dim_actions=1, hidden_dim=64, lr=1e-4, batch_size=4,device = 'cpu',temp = 3.0):
         super().__init__()
         self.policy = Policy(dim_obs, dim_actions, hidden_dim).to(device)
         self.lr = lr
         self.batch_size = batch_size
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
-
-    def loss(self, replay_buffer,Q1,Q2,V):
+        self.temp = temp
+    def loss(self, replay_buffer,Q1,V):
         state, action, reward, next_state, next_action, not_done, G = replay_buffer.sample(self.batch_size)
         with torch.no_grad():
             v = V(state)
-            q1 = Q1(state,action)
-            q2 = Q2(state,action)
-            min_Q = torch.min(q1,q2)
-        exp_a = torch.exp(min_Q - v) * 3
+            min_Q = Q1(state,action).min(0).values
+        exp_a = torch.exp(min_Q.view(1,-1) - v) * self.temp
         exp_a = torch.min(exp_a,torch.FloatTensor([100.0]).to(exp_a.device))
 
         pdf = self.policy.get_pdf(state)
@@ -386,8 +419,8 @@ class BC:
         loss =  -(log_prob * exp_a).mean()
         return loss
 
-    def train(self, replay_buffer,Q1,Q2,V):
-        loss = self.loss(replay_buffer,Q1,Q2,V)
+    def train(self, replay_buffer,Q1,V):
+        loss = self.loss(replay_buffer,Q1,V)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -419,7 +452,6 @@ class PPO:
             self,
             replay_buffer,
             Q1=None,
-            Q2=None,
             V=None,
             is_clip_decay=None,
             is_lr_decay=None
@@ -444,8 +476,8 @@ class PPO:
 
         return loss
 
-    def train(self, replay_buffer, Q1=None,Q2=None, V=None, is_clip_decay=None, is_lr_decay=None):
-        loss,approx_kl = self.loss(replay_buffer, Q1,Q2, V, is_clip_decay, is_lr_decay)
+    def train(self, replay_buffer, Q1=None, V=None, is_clip_decay=None, is_lr_decay=None):
+        loss,approx_kl = self.loss(replay_buffer, Q1, V, is_clip_decay, is_lr_decay)
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
@@ -494,7 +526,6 @@ class BPPO(PPO):
             self,
             replay_buffer,
             Q1 = None,
-            Q2 = None,
             V = None,
             is_clip_decay = None,
             is_lr_decay = None
@@ -505,8 +536,8 @@ class BPPO(PPO):
         a = old_dist.rsample()
 
         with torch.no_grad():
-            min_Q = torch.min(Q1(state,a),Q2(state,a))
-            advantage = min_Q - V(state)
+            min_Q = Q1(state,action).min(0).values
+            advantage = min_Q.view(1,-1) - V(state)
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
         # = self.weighted_advantage(advantage)
