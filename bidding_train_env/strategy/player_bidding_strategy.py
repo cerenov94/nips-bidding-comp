@@ -23,7 +23,7 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
         dir_name = os.path.dirname(dir_name)
         model_path = os.path.join(dir_name,"saved_model","BPPOtest","bppo_model.pth")
         dict_path = os.path.join(dir_name,"saved_model","BPPOtest","normalize_dict.pkl")
-        self.model = BPPO(hidden_dim=192)
+        self.model = BPPO(dim_obs=16,hidden_dim=384,n_layers=2,activation='relu')
         self.model.load_weights(model_path)
         with open(dict_path, 'rb') as file:
             self.normalize_dict = pickle.load(file)
@@ -67,6 +67,7 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
 
         historical_bid_mean = np.mean([np.mean(bid) for bid in historyBid]) if historyBid else 0
 
+
         def mean_of_last_n_elements(history, n):
             last_three_data = history[max(0, n - 3):n]
             if len(last_three_data) == 0:
@@ -82,6 +83,7 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
 
         current_pValues_mean = np.mean(pValues)
         current_pv_num = len(pValues)
+
 
         historical_pv_num_total = sum(len(bids) for bids in historyBid) if historyBid else 0
         last_three_ticks = slice(max(0, timeStepIndex - 3), timeStepIndex)
@@ -105,13 +107,25 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
 
         test_state = torch.tensor(test_state, dtype=torch.float)
 
-        alpha = self.model.get_action(test_state.unsqueeze(dim=0))
+        alpha,std = self.model.get_action(test_state.unsqueeze(dim=0))
         alpha = alpha.squeeze(dim=0)
+        std = std.squeeze(dim = 0).numpy()
         #alpha = alpha * self.action_range + self.min_action
         #alpha = torch.clamp(alpha,min=0)
         #alpha = alpha.cpu().numpy()
         #alpha = np.clip(alpha,0,float('inf'))
         bids = alpha.numpy() * pValues
 
+        # if historyLeastWinningCost:
+        #     remaining_budget = self.remaining_budget
+        #     expected_tick_status = bids >= historical_LeastWinningCost_mean
+        #     expected_tick_cost = bids * historical_LeastWinningCost_mean
+        #     over_cost_ratio = max((np.sum(expected_tick_cost) - remaining_budget) / (np.sum(expected_tick_cost) + 1e-4), 0)
+        #
+        #     if over_cost_ratio > 0:
+        #         pv_index = np.where(expected_tick_status == 0)[0]
+        #         bids[pv_index] = (alpha.numpy() - std) * (np.array(pValues)[pv_index] - np.array(pValueSigmas)[pv_index])
+        # pv_index = np.where(pValues < 0.0005)
+        # bids[pv_index] *= 0.8
 
         return bids

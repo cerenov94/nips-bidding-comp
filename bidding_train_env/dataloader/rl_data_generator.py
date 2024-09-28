@@ -34,7 +34,7 @@ class RlDataGenerator:
             del df, df_processed
             print("处理文件成功：", csv_path)
         combined_dataframe = pd.concat(training_data_list, axis=0, ignore_index=True)
-        combined_dataframe_path = os.path.join(self.training_data_path, "training_data_all-rlData.csv")
+        combined_dataframe_path = os.path.join(self.training_data_path, "training_data_all-rlData_with_add_features.csv")
         combined_dataframe.to_csv(combined_dataframe_path, index=False)
         print("整合多天训练数据成功；保存至:", combined_dataframe_path)
 
@@ -78,6 +78,20 @@ class RlDataGenerator:
                 'timeStepIndex_volume': 'first'
             }).reset_index()
 
+            # group_agg = group.groupby('timeStepIndex').agg(
+            #     bid = pd.NamedAgg('bid','mean'),
+            #     leastWinningCost = pd.NamedAgg('leastWinningCost','mean'),
+            #     conversionAction = pd.NamedAgg('conversionAction','mean'),
+            #     xi = pd.NamedAgg('xi','mean'),
+            #     pValue = pd.NamedAgg('pValue','mean'),
+            #     timeStepIndex_volume = pd.NamedAgg('timeStepIndex_volume','first'),
+            #     bid_std = pd.NamedAgg('bid','std'),
+            #     leastWinningCost_std = pd.NamedAgg('leastWinningCost','std'),
+            #     pValue_std = pd.NamedAgg('pValue','std'),
+            #     pValueSigma = pd.NamedAgg('pValueSigma','mean'),
+            #     pValueSigma_std = pd.NamedAgg('pValueSigma','std')
+            # ).reset_index()
+
             for col in ['bid', 'leastWinningCost', 'conversionAction', 'xi', 'pValue']:
                 group_agg[f'avg_{col}_all'] = group_agg[col].expanding().mean().shift(1)
                 group_agg[f'avg_{col}_last_3'] = group_agg[col].rolling(window=3, min_periods=1).mean().shift(1)
@@ -95,7 +109,7 @@ class RlDataGenerator:
                 bgtleft = remainingBudget / budget if budget > 0 else 0
 
                 state_features = current_timeStepIndex_data.iloc[0].to_dict()
-
+                #print(state_features)
                 state = (
                     timeleft, bgtleft,
                     state_features['avg_bid_all'],
@@ -111,7 +125,7 @@ class RlDataGenerator:
                     state_features['pValue_agg'],
                     state_features['timeStepIndex_volume_agg'],
                     state_features['last_3_timeStepIndexs_volume'],
-                    state_features['historical_volume']
+                    state_features['historical_volume'],
                 )
 
                 total_bid = current_timeStepIndex_data['bid'].sum()

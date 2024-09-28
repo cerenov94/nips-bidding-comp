@@ -34,7 +34,9 @@ def run_test():
 
     keys, test_dict = data_loader.keys, data_loader.test_dict
     key = keys[0]
-    num_timeStepIndex, pValues, pValueSigmas, leastWinningCosts = data_loader.mock_data(key)
+    num_timeStepIndex, pValues, pValueSigmas, leastWinningCosts,cpa_constraints = data_loader.mock_data(key)
+    agent.cpa = cpa_constraints
+    print(agent.cpa)
     rewards = np.zeros(num_timeStepIndex)
     history = {
         'historyBids': [],
