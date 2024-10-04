@@ -96,8 +96,45 @@ def run_bppo(
     #     )
     #     scores.append(score)
     #
-    validation_indexes = np.random.choice(1008, 500, replace=False, )
-    #validation_indexes = np.arange(1008)
+    #validation_indexes = np.random.choice(1008, 500, replace=False, )
+    validation_indexes = np.array([   2,    3,    5,    7,    9,   13,   16,   17,   18,   19,   21,
+         28,   29,   30,   31,   32,   33,   35,   36,   39,   41,   57,
+         59,   60,   64,   66,   67,   76,   77,   78,   80,   81,   83,
+         84,   85,   87,   90,   91,   93,   94,   95,   96,   97,   98,
+         99,  101,  102,  103,  108,  112,  116,  117,  120,  125,  126,
+        132,  133,  136,  137,  138,  142,  144,  146,  147,  149,  150,
+        151,  153,  155,  156,  157,  160,  165,  172,  174,  176,  177,
+        184,  185,  186,  189,  190,  191,  195,  198,  199,  201,  205,
+        207,  208,  211,  212,  213,  216,  218,  220,  223,  224,  225,
+        239,  240,  242,  243,  246,  249,  251,  252,  256,  257,  258,
+        261,  264,  266,  269,  270,  271,  272,  275,  277,  282,  286,
+        288,  290,  291,  293,  295,  297,  300,  301,  308,  314,  316,
+        318,  320,  324,  325,  327,  329,  334,  335,  345,  347,  349,
+        351,  352,  354,  355,  357,  360,  362,  365,  366,  368,  369,
+        371,  372,  373,  375,  376,  377,  378,  381,  382,  383,  393,
+        395,  396,  402,  403,  405,  408,  412,  413,  414,  415,  416,
+        417,  419,  421,  423,  424,  426,  430,  431,  432,  434,  438,
+        441,  445,  448,  450,  451,  453,  456,  458,  460,  461,  462,
+        465,  467,  468,  471,  473,  474,  478,  479,  486,  487,  489,
+        491,  492,  496,  498,  499,  501,  510,  513,  514,  515,  516,
+        517,  519,  526,  527,  528,  537,  539,  544,  545,  546,  551,
+        552,  554,  558,  559,  560,  563,  564,  565,  567,  568,  570,
+        574,  576,  578,  582,  585,  592,  594,  595,  597,  600,  604,
+        608,  609,  611,  612,  617,  618,  626,  630,  636,  642,  644,
+        645,  648,  650,  653,  657,  659,  661,  663,  665,  666,  670,
+        672,  674,  675,  677,  678,  681,  682,  683,  684,  685,  688,
+        691,  693,  700,  711,  712,  713,  714,  717,  718,  720,  722,
+        724,  725,  726,  727,  732,  736,  738,  740,  744,  748,  749,
+        757,  759,  761,  766,  767,  768,  769,  771,  774,  775,  777,
+        779,  784,  786,  787,  788,  789,  794,  796,  797,  798,  800,
+        801,  807,  809,  816,  819,  821,  822,  823,  825,  827,  828,
+        829,  832,  835,  837,  844,  849,  852,  863,  866,  870,  871,
+        872,  873,  875,  876,  880,  881,  882,  883,  885,  887,  894,
+        897,  898,  899,  900,  901,  903,  905,  906,  910,  911,  912,
+        914,  915,  917,  918,  920,  923,  924,  925,  928,  933,  939,
+        940,  941,  942,  943,  949,  951,  953,  954,  958,  959,  960,
+        962,  969,  970,  971,  972,  973,  976,  977,  978,  979,  981,
+        984,  993,  997,  999, 1001, 1002, 1006, 1007])
     scores = train_model(
         seed,
         with_validation,
@@ -136,7 +173,8 @@ def run_bppo(
         omega,
         validation_indexes
     )
-    return np.mean(scores)
+    #return np.mean(scores)
+    return scores
 
 
 
@@ -186,7 +224,7 @@ def train_model(
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-    train_data_path = "./data/traffic/training_data_rlData_folder/cpadf.csv"
+    train_data_path = "./data/traffic/final_rounds/training_data_rlData_folder/training_data_all-rlData.csv"
     training_data = pd.read_csv(train_data_path)
 
     def safe_literal_eval(val):
@@ -245,6 +283,7 @@ def train_model(
     WITH_VALIDATION = with_validation
     if WITH_VALIDATION:
         training_data = training_data.drop(valid_indexes).reset_index(drop = True)
+    training_data = training_data.loc[valid_indexes].reset_index(drop=True)
 
     valid_replay_buffer = ReplayBuffer(device=device)
 
@@ -362,7 +401,7 @@ def train_model(
         QQ1 = SARSA1
         QQ2 = SARSA2
 
-        best_score = -float('inf')
+        best_score = float('inf')
         current_score = 0
         for step in tqdm(range(1,BPPO_STEPS + 1)):
             if step > 200:
@@ -371,66 +410,20 @@ def train_model(
 
             loss,approx_kl = BPPOL.train(replay_buffer, QQ1,QQ1, VL, is_clip_decay, is_bppo_lr_decay)
             if step % 200 == 0:
-                state, action, reward, next_state, next_action, done, G= valid_replay_buffer.sample(1024,random_samples = False)
-
-                current_score = []
                 BPPOL.policy.eval()
-                BCL.policy.eval()
+                state, action, reward, next_state, next_action, done, G = valid_replay_buffer.sample(1024,
+                                                                                                     random_samples=False)
                 with torch.no_grad():
-                    f_e = 0
-                    for episode_index in range(48,len(done),48):
-                        episode = done[f_e:episode_index]
-                        episode_state = state[f_e:episode_index]
-                        episode_action = action[f_e:episode_index]
-                        episode_reward = reward[f_e:episode_index]
-                        episode_next_state = next_state[f_e:episode_index]
-
-                        episode_value = VL(episode_state)
-                        episode_next_value = VL(episode_next_state)
-
-                        q1 = QQ1(episode_state,episode_action)
-                        q2 = QQ2(episode_state,episode_action)
-                        target_Q = torch.min(q1,q2)
-
-
-                        pdf = BPPOL.policy.get_pdf(episode_state)
-                        pred_action = pdf.rsample()
-                        q1 = QQ1(episode_state,pred_action)
-                        q2 = QQ2(episode_state,pred_action)
-                        pred_Q = torch.min(q1,q2)
-
-                        old_pdf = BCL.policy.get_pdf(episode_state)
-
-                        action_log_prob_new = pdf.log_prob(episode_action)
-                        action_log_prob_old = old_pdf.log_prob(episode_action)
-                        weights = []
-                        returns = []
-                        G = torch.FloatTensor([0.]).to(device)
-                        weight = torch.FloatTensor([1.0]).to(device)
-                        for step in range(episode.shape[0]):
-                            new_action_prob = torch.exp(action_log_prob_new[step])
-                            old_action_prob = torch.exp(action_log_prob_old[step])
-                            weight = weight * torch.FloatTensor([1e-10]).to(device) if old_action_prob == 0.0 else new_action_prob/old_action_prob
-                            weights.append(weight)
-
-                        weights = torch.tensor(weights).to(device)
-                        weights = weights / (torch.sum(weights))
-                        for step in reversed(range(episode.shape[0])):
-                            r = episode_reward[step]
-                            v = episode_value[step]
-                            v_n = episode_next_value[step]
-                            q = target_Q[step]
-                            t = 1 - episode[step]
-                            # v + weights * r - next_q - q
-                            # weight * (r - q(s,a)) + q(s,pred_a)
-                            G = v + weights[step] * (r + t * qvalue_gamma * v_n - q)
-                            #G = weights[step] * (r - q) + pred_Q[step]
-                            returns.insert(0,G.item())
-                        f_e = episode_index
-                        score = torch.mean(torch.tensor(returns).to(device))
-                        current_score.append(score.item())
-                current_score = np.mean(current_score)
-                if current_score > best_score:
+                    q1 = SARSA1(state, action)
+                    q2 = SARSA2(state, action)
+                    min_Q = torch.min(q1, q2)
+                    pdf = BPPOL.policy.get_pdf(next_state)
+                    new_action = pdf.rsample()
+                    q1 = SARSA1(state, new_action)
+                    q2 = SARSA2(state, new_action)
+                    target_Q = torch.min(q1, q2)
+                current_score = ((min_Q - reward - qvalue_gamma * target_Q).pow(2)).mean()
+                if current_score < best_score:
                     best_score = current_score
                     BPPOL.old_policy.load_state_dict(BPPOL.policy.state_dict())
 
@@ -444,63 +437,18 @@ def train_model(
             #if approx_kl < delta:
             #    break
 
-        state, action, reward, next_state, next_action, done, G= valid_replay_buffer.sample(48, random_samples=False)
-        current_score = []
         BPPOL.policy.eval()
-        BCL.policy.eval()
+        state, action, reward, next_state, next_action, done, G = valid_replay_buffer.sample(1024, random_samples=False)
         with torch.no_grad():
-            f_e = 0
-            for episode_index in range(48, len(done), 48):
-                episode = done[f_e:episode_index]
-                episode_state = state[f_e:episode_index]
-                episode_action = action[f_e:episode_index]
-                episode_reward = reward[f_e:episode_index]
-                episode_next_state = next_state[f_e:episode_index]
-
-                episode_value = VL(episode_state)
-                episode_next_value = VL(episode_next_state)
-
-                q1 = QQ1(episode_state, episode_action)
-                q2 = QQ2(episode_state, episode_action)
-                target_Q = torch.min(q1, q2)
-
-                pdf = BPPOL.policy.get_pdf(episode_state)
-
-                pred_action = pdf.rsample()
-                q1 = QQ1(episode_state, pred_action)
-                q2 = QQ2(episode_state, pred_action)
-                pred_Q = torch.min(q1, q2)
-
-                old_pdf = BCL.policy.get_pdf(episode_state)
-
-                action_log_prob_new = pdf.log_prob(episode_action)
-                action_log_prob_old = old_pdf.log_prob(episode_action)
-                weights = []
-                returns = []
-                G = torch.FloatTensor([0.]).to(device)
-                weight = torch.FloatTensor([1.0]).to(device)
-                for step in range(episode.shape[0]):
-                    new_action_prob = torch.exp(action_log_prob_new[step])
-                    old_action_prob = torch.exp(action_log_prob_old[step])
-                    weight = weight * torch.FloatTensor([1e-10]).to(
-                        device) if old_action_prob == 0.0 else new_action_prob / old_action_prob
-                    weights.append(weight)
-
-                weights = torch.tensor(weights).to(device)
-                weights = weights / (torch.sum(weights))
-                for step in reversed(range(episode.shape[0])):
-                    r = episode_reward[step]
-                    v = episode_value[step]
-                    v_n = episode_next_value[step]
-                    q = target_Q[step]
-                    t = 1 - episode[step]
-                    #G = weights[step] * (r - q) + pred_Q[step]
-                    G = v + weights[step] * (r + t * qvalue_gamma * v_n - q)
-                    returns.insert(0, G.item())
-                f_e = episode_index
-                score = torch.mean(torch.tensor(returns).to(device))
-                current_score.append(score.item())
-        score = np.mean(current_score)
+            q1 = SARSA1(state, action)
+            q2 = SARSA2(state, action)
+            min_Q = torch.min(q1, q2)
+            pdf = BPPOL.policy.get_pdf(next_state)
+            new_action = pdf.rsample()
+            q1 = SARSA1(state, new_action)
+            q2 = SARSA2(state, new_action)
+            target_Q = torch.min(q1, q2)
+        score = ((min_Q - reward - qvalue_gamma * target_Q).pow(2)).mean()
         pred_action,_ = BPPOL.get_action(state)
         score_action = np.abs(action.cpu().numpy() - pred_action.numpy()).mean()
         with torch.no_grad():
@@ -518,10 +466,10 @@ def train_model(
 
 
         logs = torch.load('train_logs/logs.pth')
-        best_score = -float('inf')
+        best_score = float('inf')
 
         print(f'value score: {score:.5f}, mean deviation action: {score_action:.4f}')
-        if score > best_score:
+        if score < best_score:
             best_score = score
             BPPOL.save_weights()
             VL.save_weights()

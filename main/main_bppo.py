@@ -32,7 +32,7 @@ def main(trials = None):
     parser.add_argument("--value_bs",default=128,type=int)
     parser.add_argument("--value_lr",default=2e-4,type=float)
     parser.add_argument("--value_hidden_dim",default=128,type=float)
-    parser.add_argument("--v_expectile",default=0.7,type=float)
+    parser.add_argument("--v_expectile",default=0.8,type=float)
 
     # QValue hyperparameters
     parser.add_argument("--qvalue_steps",default=20000,type = int)
@@ -46,7 +46,7 @@ def main(trials = None):
     parser.add_argument("--eta",default=3.0,type=float)
 
     # Behavior clone hyperparameters
-    parser.add_argument("--bc_steps",default=18000,type = int)
+    parser.add_argument("--bc_steps",default=10000,type = int)
     parser.add_argument("--bc_bs", default=32, type=int)
     parser.add_argument("--bc_lr", default=5e-4, type=float)
     parser.add_argument("--bc_hidden_dim",default=384,type = int)
@@ -63,7 +63,7 @@ def main(trials = None):
     parser.add_argument("--bppo_bs",default=16,type = int)
     parser.add_argument("--is_clip_decay",default = True,type = lambda x: bool(strtobool(x)),nargs="?",const=True)
     parser.add_argument("--is_bppo_lr_decay",default = True,type = lambda x: bool(strtobool(x)),nargs="?",const=True)
-    parser.add_argument("--clip_ratio",default=0.1,type=float)
+    parser.add_argument("--clip_ratio",default=0.15,type=float)
     parser.add_argument('--omega',default= 0.7,type=float)
 
     args = parser.parse_args()

@@ -453,7 +453,7 @@ class BC:
             q1 = Q1(state, action)
             q2 = Q2(state, action)
             min_Q = torch.min(q1, q2)
-        exp_a = torch.exp(min_Q.view(1,-1) - v) * self.temp
+        exp_a = torch.exp(min_Q- v) * self.temp
         exp_a = torch.min(exp_a,torch.FloatTensor([100.0]).to(exp_a.device))
 
         pdf = self.policy.get_pdf(state)
