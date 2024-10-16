@@ -54,3 +54,34 @@ class ReplayBuffer:
     #         self.memory = self.memory[:12576] + self.memory[12624:]
     #     else:
     #         self.valid_memory = self.memory[12576:12624]
+
+
+class NstepRB:
+    def __init__(self, df, n_steps=3,device = 'cpy'):
+
+        self.n_steps = n_steps
+        state = np.stack(df['state'].values)
+        action = np.expand_dims(np.stack(df['action'].values), axis=-1)
+        reward = np.expand_dims(np.stack(df['reward'].values), axis=-1)
+        done = np.expand_dims(np.stack(df['done'].values), axis=-1)
+
+        self.episodes = {}
+
+        states, actions, rewards, dones = [], [], [], []
+        self.episode_counter = 0
+        for i in range(len(done)):
+            states.append(state[i])
+            actions.append(action[i])
+            rewards.append(reward[i])
+            dones.append(done[i])
+            if done[i]:
+                if len(states) != 1:
+                    self.episodes[self.episode_counter] = {
+                        'state': torch.from_numpy(np.stack(states)).to(torch.float32).to(device),
+                        'action': torch.from_numpy(np.stack(actions)).to(torch.float32).to(device),
+                        'reward': torch.from_numpy(np.stack(rewards)).to(torch.float32).to(device),
+                        'done': torch.from_numpy(np.stack(dones))
+                    }
+                    self.episode_counter += 1
+                states, actions, rewards, dones = [], [], [], []
+        self.memory = {}

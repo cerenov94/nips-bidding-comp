@@ -27,7 +27,7 @@ def run_test():
     offline evaluation
     """
     # /home/cerenov/PROJECTS/rlcomp/NeurIPS_Auto_Bidding_General_Track_Baseline/data/traffic/period-7.csv
-    data_loader = TestDataLoader(file_path='./data/traffic/period-7.csv')
+    data_loader = TestDataLoader(file_path='./data/traffic/final_rounds/period-7.csv')
     env = OfflineEnv()
     agent = PlayerBiddingStrategy()
     print(agent.name)

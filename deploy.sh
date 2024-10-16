@@ -1,3 +1,3 @@
-docker build -t registry.cn-beijing.aliyuncs.com/nips_train_env/train_env:duqiao_td3_4000 -f ./Dockerfile .
-docker push registry.cn-beijing.aliyuncs.com/nips_train_env/train_env:duqiao_td3_4000
+docker build -t registry-intl.cn-beijing.aliyuncs.com/niptest/niprep:sub193 -f ./Dockerfile .
+docker push registry-intl.cn-beijing.aliyuncs.com/niptest/niprep:sub193
 
