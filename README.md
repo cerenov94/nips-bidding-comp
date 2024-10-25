@@ -1,10 +1,10 @@
 # Overview
 23 place solution to the competition NeurIPS [Auto-Bidding in Uncertain Environment] 2024.
+
+```
 https://tianchi.aliyun.com/competition/entrance/532226
+```
 Based on offline reinforcement algorithms. 
-
-. 
-
 
 ## Dependencies
 ```
@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ```
 
 # Usage
-
+```
 Follow the instructions and project structure given:
 https://github.com/cerenov94/nips-bidding-comp/blob/main/bidding_train_env/bppo/replay_buffer_upd.py
 ```
@@ -22,9 +22,9 @@ https://github.com/cerenov94/nips-bidding-comp/blob/main/bidding_train_env/bppo/
 ## strategy training
 ### reinforcement learning-based bidding
 
+
 #### BPPO Model
 Load the training data and train the IQL bidding strategy.
-```
 ```
 python main/main_bppo.py 
 ```
