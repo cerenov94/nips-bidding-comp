@@ -149,37 +149,6 @@ def train_model():
 
     cql_model.save_weights()
 
-    state, action, reward, next_state, next_action, done, G = valid_replay_buffer.sample(1024,
-                                                                                         random_samples=False)
-    with torch.no_grad():
-        q1 = cql_model.target_Q1(state, action)
-        q2 = cql_model.target_Q2(state, action)
-        min_Q = torch.min(q1, q2)
-
-        new_action = cql_model.get_action(state, deterministic=False)
-        q1 = cql_model.target_Q1(state, new_action)
-        q2 = cql_model.target_Q2(state, new_action)
-        min_Q_pred = torch.min(q1, q2)
-
-        new_action_next = cql_model.get_action(next_state, deterministic=False)
-        q1 = cql_model.target_Q1(next_state, new_action_next)
-        q2 = cql_model.target_Q2(next_state, new_action_next)
-        target_Q = torch.min(q1, q2)
-        td = ((min_Q - reward - 0.99 * target_Q).pow(2))
-    score = (min_Q_pred + td).mean()
-
-    tem = np.concatenate((action.cpu().numpy(), new_action.cpu().numpy(), reward.cpu().numpy()), axis=1)
-    logs = torch.load('train_logs/logs.pth')
-    best_score = -float('inf')
-
-    print(f'value score: {score:.5f}, mean deviation action: {score:.4f}')
-    if score > best_score:
-        best_score = score
-        torch.save({
-            'min_valid_action_deviation': best_score,
-            'results': tem,
-            'Qvalues': torch.stack([min_Q, min_Q_pred]).detach().cpu().numpy()
-        }, 'train_logs/logs1.pth')
 
 def add_to_replay_buffer(replay_buffer, training_data, is_normalize):
     for row in training_data.itertuples():
