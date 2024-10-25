@@ -27,14 +27,16 @@ def run_test():
     offline evaluation
     """
     # /home/cerenov/PROJECTS/rlcomp/NeurIPS_Auto_Bidding_General_Track_Baseline/data/traffic/period-7.csv
-    data_loader = TestDataLoader(file_path='./data/traffic/period-7.csv')
+    data_loader = TestDataLoader(file_path='./data/traffic/final_rounds/period-7.csv')
     env = OfflineEnv()
     agent = PlayerBiddingStrategy()
     print(agent.name)
 
     keys, test_dict = data_loader.keys, data_loader.test_dict
     key = keys[0]
-    num_timeStepIndex, pValues, pValueSigmas, leastWinningCosts = data_loader.mock_data(key)
+    num_timeStepIndex, pValues, pValueSigmas, leastWinningCosts,cpa_constraints = data_loader.mock_data(key)
+    agent.cpa = cpa_constraints
+    print(agent.cpa)
     rewards = np.zeros(num_timeStepIndex)
     history = {
         'historyBids': [],
@@ -54,7 +56,6 @@ def run_test():
         if agent.remaining_budget < env.min_remaining_budget:
             bid = np.zeros(pValue.shape[0])
         else:
-
             bid = agent.bidding(timeStep_index, pValue, pValueSigma, history["historyPValueInfo"],
                                 history["historyBids"],
                                 history["historyAuctionResult"], history["historyImpressionResult"],

@@ -62,7 +62,8 @@ class TestDataLoader:
         pValueSigmas = data.groupby('timeStepIndex')['pValueSigma'].apply(list).apply(np.array).tolist()
         leastWinningCosts = data.groupby('timeStepIndex')['leastWinningCost'].apply(list).apply(np.array).tolist()
         num_timeStepIndex = len(pValues)
-        return num_timeStepIndex, pValues, pValueSigmas, leastWinningCosts
+        cpa_constraints = data['CPAConstraint'][0]
+        return num_timeStepIndex, pValues, pValueSigmas, leastWinningCosts,cpa_constraints
 
 
 if __name__ == '__main__':

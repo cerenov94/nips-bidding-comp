@@ -1,30 +1,23 @@
-import time
 import numpy as np
-import os
-import psutil
-import pickle
-
 import torch
-
-from bidding_train_env.bppo.bppo import  BPPO
+import pickle
 from bidding_train_env.strategy.base_bidding_strategy import BaseBiddingStrategy
+import os
+from bidding_train_env.bppo.cql import CQL
 
+class CQLBiddingStrategy(BaseBiddingStrategy):
 
-class PlayerBiddingStrategy(BaseBiddingStrategy):
-    """
-    Simple Strategy example for bidding.
-    """
-
-    def __init__(self, budget=100, name="BPPO-PlayerStrategy", cpa=2, category=1):
+    def __init__(self, budget=100, name="CQL-PlayerStrategy", cpa=2, category=1):
         super().__init__(budget, name, cpa, category)
 
         file_name = os.path.dirname(os.path.realpath(__file__))
         dir_name = os.path.dirname(file_name)
         dir_name = os.path.dirname(dir_name)
-        model_path = os.path.join(dir_name,"saved_model","BPPOtest","bppo_model.pth")
-        dict_path = os.path.join(dir_name,"saved_model","BPPOtest","normalize_dict.pkl")
-        self.model = BPPO(dim_obs=16,hidden_dim=384,n_layers=2,activation='relu')
+        model_path = os.path.join(dir_name,"saved_model","CQLtest","cql_model.pth")
+        dict_path = os.path.join(dir_name,"saved_model","CQLtest","normalize_dict.pkl")
+        self.model = CQL(16,1,5e-3,256,2e-4,1,False,1,1,'cpu',32)
         self.model.load_weights(model_path)
+        self.model.load_Q_weights(os.path.join(dir_name,'saved_model','CQLtest'))
         with open(dict_path, 'rb') as file:
             self.normalize_dict = pickle.load(file)
 
@@ -67,7 +60,6 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
 
         historical_bid_mean = np.mean([np.mean(bid) for bid in historyBid]) if historyBid else 0
 
-
         def mean_of_last_n_elements(history, n):
             last_three_data = history[max(0, n - 3):n]
             if len(last_three_data) == 0:
@@ -83,7 +75,6 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
 
         current_pValues_mean = np.mean(pValues)
         current_pv_num = len(pValues)
-
 
         historical_pv_num_total = sum(len(bids) for bids in historyBid) if historyBid else 0
         last_three_ticks = slice(max(0, timeStepIndex - 3), timeStepIndex)
@@ -105,27 +96,25 @@ class PlayerBiddingStrategy(BaseBiddingStrategy):
         for key, value in self.normalize_dict.items():
             test_state[key] = normalize(test_state[key], value["min"], value["max"])
 
-        test_state = torch.tensor(test_state, dtype=torch.float)
+        test_state = torch.tensor(test_state, dtype=torch.float).unsqueeze(dim=0)
+        alphas = []
+        test_states = []
+        for i in range(10):
+            alpha = self.model.get_action(test_state,deterministic=False)
+            alphas.append(alpha)
+            test_states.append(test_state)
+        test_states = torch.concatenate(test_states)
+        alphas = torch.concat(alphas)
+        with torch.inference_mode():
+            q1 = self.model.target_Q1(test_states,alphas)
+            q2 = self.model.target_Q2(test_states,alphas)
+            Q = torch.min(q1,q2)
+        q_max_id = torch.max(Q,0)[1]
 
-        alpha,std = self.model.get_action(test_state.unsqueeze(dim=0))
+        alpha = alphas[q_max_id]
+        #print(alpha,alpha.shape)
         alpha = alpha.squeeze(dim=0)
-        std = std.squeeze(dim = 0).numpy()
-        #alpha = alpha * self.action_range + self.min_action
-        #alpha = torch.clamp(alpha,min=0)
-        #alpha = alpha.cpu().numpy()
-        #alpha = np.clip(alpha,0,float('inf'))
-        bids = alpha.numpy() * pValues
-
-        # if historyLeastWinningCost:
-        #     remaining_budget = self.remaining_budget
-        #     expected_tick_status = bids >= historical_LeastWinningCost_mean
-        #     expected_tick_cost = bids * historical_LeastWinningCost_mean
-        #     over_cost_ratio = max((np.sum(expected_tick_cost) - remaining_budget) / (np.sum(expected_tick_cost) + 1e-4), 0)
-        #
-        #     if over_cost_ratio > 0:
-        #         pv_index = np.where(expected_tick_status == 0)[0]
-        #         bids[pv_index] = (alpha.numpy() - std) * (np.array(pValues)[pv_index] - np.array(pValueSigmas)[pv_index])
-        # pv_index = np.where(pValues < 0.0005)
-        # bids[pv_index] *= 0.8
+        alpha = alpha.cpu().numpy()
+        bids = alpha * pValues
 
         return bids
