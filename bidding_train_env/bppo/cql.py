@@ -146,7 +146,7 @@ class CQL(nn.Module):
         self.cql_log_alpha = torch.zeros(1,requires_grad=True)
         self.cql_alpha_optimizer = torch.optim.Adam(params=[self.cql_log_alpha],lr = self.lr)
         # policy
-        self.policy = Policy(self.obs_shape,self.action_shape,384,'relu',2,dropout=0.15)
+        self.policy = Policy(self.obs_shape,self.action_shape,256,'relu',2,dropout=0.15)
         self.policy.to(device)
         self.policy_optim = torch.optim.Adam(self.policy.parameters(),lr=self.lr)
 
