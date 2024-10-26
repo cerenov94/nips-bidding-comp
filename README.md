@@ -24,13 +24,13 @@ https://github.com/cerenov94/nips-bidding-comp/blob/main/bidding_train_env/bppo/
 
 
 #### BPPO Model
-Load the training data and train the IQL bidding strategy.
+Load the training data and train the BPPO bidding strategy.
 ```
 python main/main_bppo.py 
 ```
 
 #### CQL Model
-Load the training data and train the BC bidding strategy.
+Load the training data and train the CQL bidding strategy.
 ```
 python main/main_cql.py 
 ```
