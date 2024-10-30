@@ -16,7 +16,7 @@ pip install -r requirements.txt
 # Usage
 ```
 Follow the instructions and project structure given:
-https://github.com/cerenov94/nips-bidding-comp/blob/main/bidding_train_env/bppo/replay_buffer_upd.py
+https://github.com/alimama-tech/NeurIPS_Auto_Bidding_General_Track_Baseline
 ```
 
 ## strategy training
