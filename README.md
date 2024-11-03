@@ -1,6 +1,6 @@
 # Overview
-23 place solution to the competition NeurIPS [Auto-Bidding in Uncertain Environment] 2024.
-
+23th place solution to the competition NeurIPS [Auto-Bidding in Uncertain Environment] 2024.
+https://tianchi.aliyun.com/home/science/scienceDetail?spm=a2c22.12281920.0.0.35502e0aQJqsUz&userId=1095280667830
 ```
 https://tianchi.aliyun.com/competition/entrance/532226
 ```
